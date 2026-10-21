@@ -1,0 +1,92 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>Ferro — Describe the part. We handle the rest.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#111318; --panel:#1b1e24; --line:#2c3038; --txt:#e8e8e2;
+          --dim:#8b93a1; --acc:#e07b39; --acc2:#7fb069; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family:'Inter',system-ui,sans-serif; }
+  header { display:flex; align-items:baseline; gap:14px; padding:22px 28px 10px;
+           border-bottom:1px solid var(--line); }
+  header h1 { font-size:26px; margin:0; letter-spacing:1px; }
+  header h1 span { color:var(--acc); }
+  header .tag { color:var(--dim); font-size:13px; }
+  main { display:grid; grid-template-columns: 1.1fr 1fr; gap:0;
+         height:calc(100vh - 71px); }
+  .col { padding:18px; overflow-y:auto; }
+  .col.right { border-left:1px solid var(--line); }
+  .box { background:var(--panel); border:1px solid var(--line);
+         border-radius:10px; padding:14px; margin-bottom:14px; }
+  .box h3 { margin:0 0 8px; font-size:12px; color:var(--dim);
+            text-transform:uppercase; letter-spacing:2px; }
+  #chat { display:flex; flex-direction:column; gap:10px; min-height:200px; }
+  .msg { padding:10px 14px; border-radius:12px; max-width:92%;
+         font-size:14px; line-height:1.5; white-space:pre-wrap; }
+  .msg.user { background:#2a3140; align-self:flex-end; }
+  .msg.agent { background:var(--panel); border:1px solid var(--line);
+               align-self:flex-start; }
+  #inputbar { display:flex; gap:8px; margin-top:12px; }
+  #input { flex:1; background:#14161b; color:var(--txt);
+           border:1px solid var(--line); border-radius:9px;
+           padding:12px 14px; font-size:15px; outline:none; }
+  #input:focus { border-color:var(--acc); }
+  button { background:var(--acc); border:0; color:#14161b; font-weight:700;
+           border-radius:9px; padding:0 18px; cursor:pointer; font-size:14px; }
+  button:hover { filter:brightness(1.1); }
+  .chips { display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; }
+  .chip { background:#20242c; border:1px solid var(--line); color:var(--dim);
+          padding:6px 12px; border-radius:99px; font-size:12.5px;
+          cursor:pointer; }
+  .chip:hover { color:var(--txt); border-color:var(--acc); }
+  #status { color:var(--acc); font-size:12px; min-height:16px; }
+  #preview { text-align:center; }
+  #preview svg { max-width:100%; border-radius:8px; }
+  pre { background:#14161b; border:1px solid var(--line); border-radius:8px;
+        padding:12px; font-size:12px; overflow-x:auto; color:#a8d08d;
+        white-space:pre-wrap; }
+  #packet, #dfmbox { display:none; }
+  #approve { margin-top:6px; }
+  .foot { color:var(--dim); font-size:11.5px; padding:10px 28px;
+          border-top:1px solid var(--line); }
+  @media(max-width:900px){ main{grid-template-columns:1fr; height:auto;} }
+</style>
+</head><body>
+<header>
+  <h1>FERRO<span>.</span></h1>
+  <div class="tag">bespoke CNC parts — describe it, approve it, we cut it.</div>
+</header>
+<main>
+  <div class="col">
+    <div class="chips">
+      <div class="chip" onclick="loadDemo('bracket')">⚙ L-bracket demo</div>
+      <div class="chip" onclick="loadDemo('plate')">▤ Base plate demo</div>
+      <div class="chip" onclick="loadDemo('enclosure')">□ Enclosure demo</div>
+    </div>
+    <div class="box"><h3>Design intake</h3>
+      <div id="chat"></div>
+      <div id="status"></div>
+      <div id="inputbar">
+        <input id="input" placeholder="Describe the part you need…">
+        <button onclick="send()">Send</button>
+      </div>
+    </div>
+  </div>
+  <div class="col right">
+    <div class="box"><h3>Live design preview</h3><div id="preview">
+      <div style="color:var(--dim);font-size:13px;padding:24px 8px">
+        Nothing yet — start the conversation and a parametric preview renders here.
+      </div></div></div>
+    <div class="box" id="dfmbox"><h3>DFM notes</h3><ul id="dfm"></ul></div>
+    <div class="box" id="packet"><h3>Design packet (on approval → CAD → CAM)</h3>
+      <div id="sheet"></div>
+      <pre id="scad"></pre>
+      <button id="approve" onclick="alert('✓ Design approved — packet queued for CAD/CAM (deferred phase). This locks the parametric rev and starts the machining pipeline.')">Approve for CAD</button>
+    </div>
+  </div>
+</main>
+<div class="foot">Ferro prototype v0.1 — intake &amp; design agent live · CAD→CAM pipeline deferred (roadmap) · powered by a Hermes agent that compounds with every engagement</div>
+<script src="/static/app.js"></script>
+</body></html>

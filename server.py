@@ -17,22 +17,43 @@ Your job: turn a natural-language customer request into a concrete design, ask a
 2-3 sharp clarifying questions when genuinely needed (not on the first response if the
 request is already concrete), and iterate fast on edits.
 
-You have a parametric engine with these part families and parameters (mm):
+You operate in TWO modes:
+
+MODE 1 — PARAMETRIC (preferred when it fits). Parametric engine families (mm):
 - bracket: base_len, base_wid, base_th, vert_len, vert_th, hole_d, hole_count, fillet_r
 - plate: length, width, thickness, hole_d, hole_count, corner_r
 - enclosure: width, depth, height, wall, lid, vents, port_w, port_h
+If the request fits (or nearly fits) a family, END your message with:
+```design
+{"family": "<bracket|plate|enclosure>", "params": {...}, "material": "6061-T6"}
+```
+Include absolute values for the keys you're setting. On edits, re-emit the FULL set.
+
+MODE 2 — GENERATIVE (any part that does not fit a family: brackets with gussets,
+V-blocks, fixtures, spacers, hinges, custom frames, sculptural parts, etc.).
+Write complete OpenSCAD source (valid, self-contained, $fn>=64, mm units) that
+produces the part. END your message with:
+```scad
+// GENERATIVE DESIGN — REQUIRES CAM REVIEW
+// bbox: <approx W x D x H mm>
+// material: <stock material>
+// notes: <one line on machining approach>
+<complete OpenSCAD source>
+```
+Rules for generative mode:
+- Prefer primitive combinations (cube/cylinder/hull) over obscure functions.
+- Put holes/cutouts as difference() from the solid, clean edges.
+- State assumed stock size in the header comment.
+- Be conservative: simple, machinable geometry. No threads, no text engraving.
+- Always say in prose that this draft needs engineer review before machining.
+
 Materials in stock: 6061-T6, 7075-T6, steel-1018, 304-SS, delrin.
 
-RULES:
+RULES (both modes):
 1. Reply conversationally — brief, concrete, engineer-to-engineer. No fluff.
-2. Whenever the design is concrete enough, END your message with a fenced block:
-```design
-{"family": "<bracket|plate|enclosure>", "params": {...only keys you want to set...}, "material": "6061-T6"}
-```
-Include the params you are setting given the conversation so far (absolute values, not deltas).
-3. On edits ("make it wider", "thicker"), update params and re-emit the design block with the FULL updated param set.
-4. You may add a "dfm_comment" string inside the design JSON with one manufacturing note.
-5. Never emit parameters outside the families above. Pick the closest family if unsure and say so.
+2. Pick the closest mode; say which you chose and why in one clause.
+3. On edits, regenerate with the FULL updated geometry.
+4. Never invent machining parameters (feeds/speeds) — that is the CAM cell's job.
 """
 
 def load_state(session):
@@ -100,6 +121,32 @@ def ask_hermes(prompt, timeout=150):
         except OSError: pass
 
 DESIGN_RE = re.compile(r"```design\s*(\{.*?\})\s*```", re.S)
+SCAD_RE = re.compile(r"```scad\s*\n(.*?)```", re.S)
+
+def validate_scad(src):
+    """Lightweight static checks (real kernel verification needs openscad)."""
+    notes = []
+    if src.count("{") != src.count("}"):
+        notes.append("Unbalanced braces — OpenSCAD will not compile; flagged for review.")
+    if src.count("(") != src.count(")"):
+        notes.append("Unbalanced parentheses — flagged for review.")
+    if not re.search(r"(cube|cylinder|sphere|polyhedron|linear_extrude|rotate_extrude)", src):
+        notes.append("No solid primitive found — flagged for review.")
+    if "$fn" not in src:
+        notes.append("No $fn smoothing set — fine for review, defaults applied at render.")
+    return notes
+
+def parse_scad_block(out):
+    m = SCAD_RE.search(out)
+    if not m:
+        return None, None, None
+    src = m.group(1).strip()
+    header = {}
+    for line in src.splitlines()[:6]:
+        mm = re.match(r"//\s*(bbox|material|notes)\s*:\s*(.+)", line.strip())
+        if mm:
+            header[mm.group(1)] = mm.group(2).strip()
+    return src, header, validate_scad(src)
 
 def fallback_reply(message):
     m = message.lower()
@@ -120,23 +167,29 @@ def process(message, st):
     prompt = build_prompt(st, message)
     st["history"].append({"role": "user", "text": message})
     out, ok = ask_hermes(prompt)
+    gen = None
     if not ok:
         reply, design, extra = fallback_reply(message)
     else:
         reply, design = out, None
-        m = DESIGN_RE.search(out)
-        dfm_comment = None
-        if m:
-            try:
-                d = json.loads(m.group(1))
-                fam = d.get("family", "").lower()
-                if fam in T.SCHEMAS:
-                    design = {"family": fam, "params": d.get("params", {}),
-                              "material": d.get("material", "6061-T6")}
-                    dfm_comment = d.get("dfm_comment")
-                reply = DESIGN_RE.sub("", out).strip() or "Here you go."
-            except json.JSONDecodeError:
-                pass
+        # generative mode first: a ```scad block means bespoke geometry
+        src, header, scad_notes = parse_scad_block(out)
+        if src:
+            gen = {"scad": src, "header": header, "notes": scad_notes}
+            reply = SCAD_RE.sub("", out).strip()
+            st["design"] = None  # generative replaces parametric state
+        else:
+            m = DESIGN_RE.search(out)
+            if m:
+                try:
+                    d = json.loads(m.group(1))
+                    fam = d.get("family", "").lower()
+                    if fam in T.SCHEMAS:
+                        design = {"family": fam, "params": d.get("params", {}),
+                                  "material": d.get("material", "6061-T6")}
+                    reply = DESIGN_RE.sub("", out).strip() or "Here you go."
+                except json.JSONDecodeError:
+                    pass
     st["history"].append({"role": "agent", "text": reply})
     if design:
         clean, notes = T.normalize(design["family"], design["params"])
@@ -146,7 +199,7 @@ def process(message, st):
         st["design"] = clean
     else:
         clean, notes = st.get("design"), []
-    return reply, clean, notes
+    return reply, clean, notes, gen
 
 app = FastAPI()
 
@@ -154,9 +207,17 @@ app = FastAPI()
 async def chat(req: Request):
     body = await req.json()
     st = load_state(body.get("session", "default"))
-    reply, design, notes = process(body.get("message", ""), st)
+    reply, design, notes, gen = process(body.get("message", ""), st)
     save_state(body["session"], st)
     resp = {"reply": reply, "dfm_notes": notes}
+    if gen:
+        h = gen.get("header", {})
+        resp["generative"] = {
+            "scad": gen["scad"],
+            "bbox": h.get("bbox", ""),
+            "material": h.get("material", ""),
+            "notes": gen["notes"],
+        }
     if design:
         resp.update(design={
             "family": design["family"], "params": design},

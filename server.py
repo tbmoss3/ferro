@@ -57,8 +57,32 @@ def build_prompt(st, message):
     lines.append(f"== NEW CUSTOMER MESSAGE ==\n{message}\n== YOUR REPLY ==")
     return "\n".join(lines)
 
+def ask_openrouter(prompt, timeout=150):
+    """Direct brain: OpenAI-compatible call via OpenRouter. Used when the Hermes
+    CLI is unavailable (e.g. container deploy). Same prompt => same behavior."""
+    import urllib.request
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        return None, False
+    model = os.environ.get("FERRO_BRAIN_MODEL", "z-ai/glm-5.3")
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        r = json.load(urllib.request.urlopen(req, timeout=timeout))
+        return r["choices"][0]["message"]["content"].strip(), True
+    except Exception:
+        return None, False
+
 def ask_hermes(prompt, timeout=150):
-    """Live Hermes agent — one-shot query. Falls back to a canned answer on failure."""
+    """Brain: Hermes CLI one-shot if available (local dev), else OpenRouter HTTP."""
+    out, ok = ask_openrouter(prompt, timeout)
+    if ok:
+        return out, True
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(prompt); ppath = f.name
     try:

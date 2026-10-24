@@ -1,92 +1,211 @@
 <!doctype html>
-<html><head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <title>Ferro — Describe the part. We handle the rest.</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Bespoke CNC parts from a conversation. Describe the part, approve the design, we cut it. Design intake in hours, not weeks.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111318'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='20' fill='%23e07b39' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E">
 <style>
-  :root { --bg:#111318; --panel:#1b1e24; --line:#2c3038; --txt:#e8e8e2;
-          --dim:#8b93a1; --acc:#e07b39; --acc2:#7fb069; }
+  :root { --bg:#0d0f13; --panel:#171a20; --panel2:#1d2129; --line:#2e343f;
+          --txt:#ecebe6; --dim:#a3aab6; --faint:#77808f;
+          --acc:#e8853d; --acc-hi:#f79a55; --ok:#7fb069; }
   * { box-sizing:border-box; }
+  html, body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--txt);
-         font-family:'Inter',system-ui,sans-serif; }
-  header { display:flex; align-items:baseline; gap:14px; padding:22px 28px 10px;
-           border-bottom:1px solid var(--line); }
-  header h1 { font-size:26px; margin:0; letter-spacing:1px; }
+         font-family:'Inter',system-ui,-apple-system,sans-serif;
+         display:flex; flex-direction:column; overflow:hidden; }
+  ::selection { background:var(--acc); color:#111; }
+
+  /* dark slim scrollbars everywhere */
+  * { scrollbar-width:thin; scrollbar-color:#2a303a transparent; }
+  *::-webkit-scrollbar { width:8px; height:8px; }
+  *::-webkit-scrollbar-thumb { background:#2a303a; border-radius:4px; }
+  *::-webkit-scrollbar-track { background:transparent; }
+
+  a { color:var(--dim); text-decoration:none; }
+  a:hover { color:var(--acc); }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:6px; }
+
+  header { display:flex; align-items:baseline; gap:14px; padding:16px 26px 12px;
+           border-bottom:1px solid var(--line); flex:0 0 auto; }
+  header h1 { font-size:24px; margin:0; letter-spacing:1.5px; font-weight:800; }
   header h1 span { color:var(--acc); }
   header .tag { color:var(--dim); font-size:13px; }
-  main { display:grid; grid-template-columns: 1.1fr 1fr; gap:0;
-         height:calc(100vh - 71px); }
-  .col { padding:18px; overflow-y:auto; }
-  .col.right { border-left:1px solid var(--line); }
+  header nav { margin-left:auto; display:flex; gap:18px; font-size:13px; }
+  header nav a { color:var(--dim); }
+  .steps { display:flex; gap:22px; padding:10px 26px; font-size:12.5px; color:var(--faint);
+           border-bottom:1px solid var(--line); flex:0 0 auto; }
+  .steps b { color:var(--acc); font-weight:700; margin-right:6px; }
+
+  main { display:grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr);
+         flex:1 1 auto; min-height:0; }
+  .col { padding:16px 20px 20px 26px; overflow-y:auto; min-height:0; }
+  .col.right { border-left:1px solid var(--line); padding-left:20px; margin-right:12px; }
+
   .box { background:var(--panel); border:1px solid var(--line);
-         border-radius:10px; padding:14px; margin-bottom:14px; }
-  .box h3 { margin:0 0 8px; font-size:12px; color:var(--dim);
-            text-transform:uppercase; letter-spacing:2px; }
-  #chat { display:flex; flex-direction:column; gap:10px; min-height:200px; }
-  .msg { padding:10px 14px; border-radius:12px; max-width:92%;
-         font-size:14px; line-height:1.5; white-space:pre-wrap; }
-  .msg.user { background:#2a3140; align-self:flex-end; }
-  .msg.agent { background:var(--panel); border:1px solid var(--line);
+         border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .box h3 { margin:0 0 10px; font-size:11px; color:var(--faint);
+            text-transform:uppercase; letter-spacing:2.2px; font-weight:700; }
+  .box h3 em { color:var(--acc); font-style:normal; }
+
+  .chips { display:flex; gap:8px; margin:14px 0 12px; flex-wrap:wrap; flex:0 0 auto; }
+  .chip { background:var(--panel); border:1px solid var(--line); color:var(--dim);
+          padding:8px 14px; border-radius:99px; font-size:12.5px; cursor:pointer;
+          transition:all .15s; }
+  .chip:hover { color:var(--txt); border-color:var(--acc); background:var(--panel2); }
+
+  .intake { display:flex; flex-direction:column; min-height:0; }
+  #chat { flex:1 1 auto; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+          min-height:120px; padding-right:4px; }
+  .msg { padding:11px 14px; border-radius:14px; max-width:94%;
+         font-size:14px; line-height:1.55; white-space:pre-wrap; }
+  .msg.user { background:#2a3140; align-self:flex-end; border:1px solid #38415a; }
+  .msg.agent { background:var(--panel2); border:1px solid var(--line);
                align-self:flex-start; }
-  #inputbar { display:flex; gap:8px; margin-top:12px; }
-  #input { flex:1; background:#14161b; color:var(--txt);
-           border:1px solid var(--line); border-radius:9px;
-           padding:12px 14px; font-size:15px; outline:none; }
+  .msg code { background:#0d0f13; border:1px solid var(--line); border-radius:5px;
+              padding:1px 5px; font-size:12.5px; color:#a8d08d; }
+
+  .welcome { border:1px dashed var(--line); border-radius:14px; padding:18px;
+             color:var(--dim); font-size:14px; line-height:1.6; }
+  .welcome b { color:var(--txt); }
+  .welcome .ex { display:block; margin-top:10px; color:var(--acc); cursor:pointer;
+                 font-size:13.5px; }
+  .welcome .ex:hover { text-decoration:underline; }
+
+  #status { color:var(--dim); font-size:12px; min-height:18px; padding:6px 2px 0; }
+  .dots i { display:inline-block; width:5px; height:5px; border-radius:50%;
+            background:var(--acc); margin-right:3px; animation:pulse 1.2s infinite; }
+  .dots i:nth-child(2) { animation-delay:.2s; } .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes pulse { 0%,100%{opacity:.25} 50%{opacity:1} }
+
+  #inputbar { display:flex; gap:8px; padding-top:8px; flex:0 0 auto; }
+  #input { flex:1; background:#111319; color:var(--txt);
+           border:1px solid var(--line); border-radius:10px;
+           padding:13px 15px; font-size:15px; outline:none; }
   #input:focus { border-color:var(--acc); }
-  button { background:var(--acc); border:0; color:#14161b; font-weight:700;
-           border-radius:9px; padding:0 18px; cursor:pointer; font-size:14px; }
-  button:hover { filter:brightness(1.1); }
-  .chips { display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; }
-  .chip { background:#20242c; border:1px solid var(--line); color:var(--dim);
-          padding:6px 12px; border-radius:99px; font-size:12.5px;
-          cursor:pointer; }
-  .chip:hover { color:var(--txt); border-color:var(--acc); }
-  #status { color:var(--acc); font-size:12px; min-height:16px; }
-  #preview { text-align:center; }
+  #input::placeholder { color:var(--faint); }
+  button { background:var(--acc); border:0; color:#16110c; font-weight:700;
+           border-radius:10px; padding:0 20px; cursor:pointer; font-size:14px;
+           transition:background .15s; }
+  button:hover:not(:disabled) { background:var(--acc-hi); }
+  button:disabled { opacity:.55; cursor:default; }
+
+  #preview { text-align:center; min-height:120px; }
   #preview svg { max-width:100%; border-radius:8px; }
-  pre { background:#14161b; border:1px solid var(--line); border-radius:8px;
+  #preview .empty { color:var(--faint); font-size:13px; padding:34px 10px; line-height:1.7; }
+  #preview .empty b { color:var(--dim); font-size:14px; }
+  .genbanner { text-align:left; font-size:13px; line-height:1.6; padding:8px 4px; }
+  .gentitle { color:var(--acc); font-weight:800; letter-spacing:1.2px; font-size:12px; }
+  .genrow { margin-top:8px; color:var(--txt); }
+  .genbody { color:var(--faint); margin-top:8px; font-size:12.5px; }
+
+  #dfmbox, #packet { display:none; }
+  #dfm { margin:0; padding-left:18px; color:var(--txt); font-size:13.5px; line-height:1.7; }
+  #sheet { font-family:ui-monospace,monospace; font-size:12.5px; color:var(--dim);
+           line-height:1.65; white-space:pre-wrap; margin:0 0 10px; }
+  pre { background:#111319; border:1px solid var(--line); border-radius:8px;
         padding:12px; font-size:12px; overflow-x:auto; color:#a8d08d;
-        white-space:pre-wrap; }
-  #packet, #dfmbox { display:none; }
-  #approve { margin-top:6px; }
-  .foot { color:var(--dim); font-size:11.5px; padding:10px 28px;
-          border-top:1px solid var(--line); }
-  @media(max-width:900px){ main{grid-template-columns:1fr; height:auto;} }
+        white-space:pre-wrap; margin:0 0 12px; }
+  #massline { color:var(--faint); font-size:12px; margin-bottom:10px; }
+  #approve { width:100%; padding:12px 0; font-size:14.5px; }
+  #approve.approved { background:transparent; border:1px solid var(--ok); color:var(--ok); }
+
+  .materials { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;
+               font-size:13px; color:var(--dim); }
+  .materials b { color:var(--txt); font-weight:600; }
+  .specs { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .spec { background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+          padding:8px 12px; font-size:12px; color:var(--faint); }
+  .spec b { display:block; color:var(--txt); font-size:13.5px; margin-bottom:2px; }
+
+  footer { display:flex; gap:22px; padding:10px 26px; border-top:1px solid var(--line);
+           color:var(--faint); font-size:12px; flex:0 0 auto; flex-wrap:wrap; }
+
+  @media (max-width:900px) {
+    body { overflow:auto; }
+    main { grid-template-columns:1fr; }
+    .col.right { border-left:0; border-top:1px solid var(--line); }
+    header { flex-wrap:wrap; gap:8px 14px; }
+    header nav { margin-left:0; width:100%; }
+  }
 </style>
 </head><body>
 <header>
   <h1>FERRO<span>.</span></h1>
   <div class="tag">bespoke CNC parts — describe it, approve it, we cut it.</div>
+  <nav>
+    <a href="#" onclick="return false" title="roadmap">How it works</a>
+    <a href="#" onclick="return false" title="roadmap">Materials</a>
+    <a href="#" onclick="startWith('What can you make?');return false">Ask the agent</a>
+  </nav>
 </header>
+<div class="steps">
+  <div><b>1</b>Describe the part — plain English, mm or inches</div>
+  <div><b>2</b>Iterate the design with the agent until it's right</div>
+  <div><b>3</b>Approve → CAD → CAM → chips fly</div>
+</div>
 <main>
   <div class="col">
     <div class="chips">
-      <div class="chip" onclick="loadDemo('bracket')">⚙ L-bracket demo</div>
-      <div class="chip" onclick="loadDemo('plate')">▤ Base plate demo</div>
-      <div class="chip" onclick="loadDemo('enclosure')">□ Enclosure demo</div>
+      <div class="chip" onclick="startWith('I need an L-bracket to mount a 3HP motor to a steel frame, 6061, 4 mounting holes')">L-bracket</div>
+      <div class="chip" onclick="startWith('Make me a base plate 200mm x 120mm, 12mm thick 6061, six holes')">Base plate</div>
+      <div class="chip" onclick="startWith('An electronics enclosure for a Raspberry Pi stack, 6061, with a front USB port cutout')">Enclosure</div>
+      <div class="chip" onclick="startWith('I need a V-block for holding 50mm round stock while milling a flat on it, aluminum, two clamp screw holes')">V-block</div>
+      <div class="chip" onclick="newChat()">↺ New conversation</div>
     </div>
-    <div class="box"><h3>Design intake</h3>
-      <div id="chat"></div>
-      <div id="status"></div>
+    <div class="box intake"><h3>Design intake <em>· live agent</em></h3>
+      <div id="chat">
+        <div class="welcome">
+          <b>What are we making?</b><br>
+          I'm Ferro's design agent. Tell me what the part is for, roughly how big,
+          and what it mounts to — I'll ask the two questions a machinist would,
+          draft the geometry, and hand you a spec packet you can approve.
+          <span class="ex" onclick="startWith('I need an L-bracket to mount a 3HP motor to a steel frame, 6061, 4 mounting holes')">→ Motor-mount bracket, 6061</span>
+          <span class="ex" onclick="startWith('I need a V-block for holding 50mm round stock while milling a flat on it, aluminum, two clamp screw holes')">→ V-block fixture for 50mm stock</span>
+          <span class="ex" onclick="startWith('An electronics enclosure for a Raspberry Pi stack, 6061, with a front USB port cutout')">→ Pi-stack electronics enclosure</span>
+        </div>
+      </div>
+      <div id="status" aria-live="polite"></div>
       <div id="inputbar">
-        <input id="input" placeholder="Describe the part you need…">
-        <button onclick="send()">Send</button>
+        <input id="input" placeholder="Describe the part you need…" aria-label="Describe the part you need">
+        <button id="sendbtn" onclick="send()">Send</button>
       </div>
     </div>
   </div>
   <div class="col right">
     <div class="box"><h3>Live design preview</h3><div id="preview">
-      <div style="color:var(--dim);font-size:13px;padding:24px 8px">
-        Nothing yet — start the conversation and a parametric preview renders here.
-      </div></div></div>
+      <div class="empty"><b>Nothing yet.</b><br>
+        Start the conversation — a parametric preview renders here
+        as we talk. Generative drafts show their OpenSCAD source
+        and route to engineer review.</div></div></div>
     <div class="box" id="dfmbox"><h3>DFM notes</h3><ul id="dfm"></ul></div>
-    <div class="box" id="packet"><h3>Design packet (on approval → CAD → CAM)</h3>
+    <div class="box" id="packet"><h3>Design packet <em>· approval → CAD → CAM</em></h3>
       <div id="sheet"></div>
+      <div id="massline"></div>
       <pre id="scad"></pre>
-      <button id="approve" onclick="alert('✓ Design approved — packet queued for CAD/CAM (deferred phase). This locks the parametric rev and starts the machining pipeline.')">Approve for CAD</button>
+      <button id="approve">Approve for CAD</button>
+    </div>
+    <div class="box"><h3>Shop capabilities</h3>
+      <div class="materials">
+        <div><b>6061-T6 / 7075-T6</b> aluminum</div>
+        <div><b>1018 steel · 304/316 SS</b></div>
+        <div><b>Delrin</b> &amp; engineering plastics</div>
+        <div><b>2.5D + flips</b> (5-axis: roadmap)</div>
+      </div>
+      <div class="specs">
+        <div class="spec"><b>Design intake</b>hours, not weeks</div>
+        <div class="spec"><b>Tolerances</b>±0.05 mm typical</div>
+        <div class="spec"><b>DFM feedback</b>on every draft</div>
+        <div class="spec"><b>Units</b>mm (inches on request)</div>
+      </div>
     </div>
   </div>
 </main>
-<div class="foot">Ferro prototype v0.1 — intake &amp; design agent live · CAD→CAM pipeline deferred (roadmap) · powered by a Hermes agent that compounds with every engagement</div>
+<footer>
+  <div><b style="color:var(--dim)">FERRO</b> · prototype v0.3</div>
+  <div>intake &amp; design agent live · CAD→CAM pipeline gated (roadmap)</div>
+  <div><a href="mailto:bmoss@sh-cre.com">bmoss@sh-cre.com</a></div>
+  <div style="margin-left:auto">compounds with every engagement</div>
+</footer>
 <script src="/static/app.js"></script>
 </body></html>

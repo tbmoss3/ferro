@@ -115,12 +115,21 @@ def _boxes(p):
             holes.append((p["vert_th"] / 2, y, bt, "x", p["hole_d"]))
         return boxes, holes
     if fam == "plate":
-        boxes = [(0, 0, 0, p["length"], p["width"], p["thickness"])]
+        L, W = p["length"], p["width"]
+        boxes = [(0, 0, 0, L, W, p["thickness"])]
+        n = max(1, int(round(p["hole_count"])))
+        inset = min(0.08 * min(L, W), 15.0)
+        rows = 2 if (n % 2 == 0 and n >= 4) else 1
+        cols = (n + rows - 1) // rows
         holes = []
-        n = max(2, int(round(p["hole_count"])))
-        for i in range(n):
-            x = (p["length"] * (i + 0.5)) / n
-            holes.append((x, p["width"] / 2, 0, "z", p["hole_d"]))
+        for j in range(rows):
+            y = inset if rows == 1 else inset + j * (W - 2 * inset) / (rows - 1)
+            for i in range(cols):
+                idx = j * cols + i
+                if idx >= n:
+                    break
+                x = inset + i * (L - 2 * inset) / (cols - 1) if cols > 1 else L / 2
+                holes.append((x, y, 0, "z", p["hole_d"]))
         return boxes, holes
     if fam == "enclosure":
         w, d, h, t = p["width"], p["depth"], p["height"], p["wall"]
@@ -157,7 +166,12 @@ def render_svg(p, scale=1.6):
         return (pt[0] * f + ox, pt[1] * f + oy)
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" font-family="monospace">']
     parts.append(f'<rect width="{W}" height="{H}" fill="#f4f4f0"/>')
-    parts.append(f'<text x="12" y="20" font-size="11" fill="#555">FERRO DESIGN PREVIEW — {p["family"]} — iso</text>')
+    dimx = max(b[3] for b in boxes) if boxes else 0
+    dimy = max(b[4] for b in boxes) if boxes else 0
+    dimz = max(h for _, _, _, _, _, h in boxes) if boxes else 0
+    parts.append(f'<text x="12" y="20" font-size="11" fill="#555">FERRO · {p["family"]} · iso · {dimx:.0f} × {dimy:.0f} × {dimz:.0f} mm</text>')
+    holes_n = len([h for h in holes if not (len(h) > 5)])
+    parts.append(f'<text x="{W-12}" y="20" font-size="11" fill="#555" text-anchor="end">{holes_n} holes</text>')
     def face(pts, fill, stroke="#333"):
         pp = " ".join(f"{a:.1f},{b:.1f}" for a, b in pts)
         return f'<polygon points="{pp}" fill="{fill}" stroke="{stroke}" stroke-width="0.8"/>'
@@ -175,7 +189,7 @@ def render_svg(p, scale=1.6):
         dia = rest[0]
         parts.append(f'<circle cx="{X:.1f}" cy="{Y:.1f}" r="{dia * f / 2:.1f}" fill="#fff" stroke="#333" stroke-width="0.8"/>')
         parts.append(f'<line x1="{X:.1f}" y1="{Y:.1f}" x2="{X + dia * f / 2:.1f}" y2="{Y:.1f}" stroke="#333" stroke-width="0.5" stroke-dasharray="3,2"/>')
-    parts.append(f'<text x="12" y="{H-10}" font-size="10" fill="#777">dims in mm — parametric, OpenSCAD source attached</text>')
+    parts.append(f'<text x="12" y="{H-10}" font-size="10" fill="#444">dims in mm — parametric, OpenSCAD source attached</text>')
     parts.append("</svg>")
     return "".join(parts)
 

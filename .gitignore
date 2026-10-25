@@ -3,3 +3,6 @@ __pycache__/
 sessions/
 .env
 sessions/
+.venv-cad/
+artifacts/
+nohup.out

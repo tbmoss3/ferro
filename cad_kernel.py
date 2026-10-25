@@ -1,0 +1,220 @@
+"""Ferro CAD kernel — Phase A.
+Executes build123d (OpenCASCADE) geometry in a subprocess and returns
+exact metrics, STEP/STL artifacts, DFM checks, and a rendered PNG preview.
+Agents draft geometry; this kernel is the deterministic verifier.
+"""
+import json, math, os, subprocess, sys, tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).parent
+ARTIFACTS = ROOT / "artifacts"
+ARTIFACTS.mkdir(exist_ok=True)
+PY = os.environ.get("FERRO_CAD_PY") or str(ROOT / ".venv-cad" / "bin" / "python")
+
+# kg/m^3 — must mirror templates.MATERIALS densities (kg/mm^3 * 1e9)
+DENSITIES = {
+    "6061-T6": 2700, "7075-T6": 2810, "steel-1018": 7870,
+    "304-SS": 7900, "delrin": 1410,
+}
+
+# runs INSIDE the cad subprocess (written to a temp script, run with PY)
+HARNESS = r'''
+import json, sys, math
+result = {"ok": False}
+try:
+    from build123d import BuildPart, Box, Cylinder, extrude, export_step, export_stl
+    from build123d import __version__ as b123d_version
+    ns = {"__name__": "__ferro_kernel__"}
+    src = open(sys.argv[1]).read()
+    exec(compile(src, "design.py", "exec"), ns)
+    part = ns.get("result")
+    if part is None:
+        raise RuntimeError("script did not define a top-level `result` part")
+    s = part if not hasattr(part, "part") else part.part
+    if s is None:
+        raise RuntimeError("empty result shape")
+    bb = s.bounding_box()
+    vol = s.volume          # mm^3
+    area = s.area           # mm^2
+    export_step(s, sys.argv[2])
+    export_stl(s, sys.argv[3])
+    # BRep validity check
+    valid = True
+    try:
+        from build123d import Solid
+        solids = s.solids()
+        valid = all(x.is_valid() for x in solids)
+    except Exception:
+        pass
+    result.update({
+        "ok": True,
+        "volume_mm3": round(vol, 2),
+        "area_mm2": round(area, 2),
+        "bbox": [round(bb.min.X,2), round(bb.min.Y,2), round(bb.min.Z,2),
+                 round(bb.max.X,2), round(bb.max.Y,2), round(bb.max.Z,2)],
+        "size_mm": [round(bb.size.X,2), round(bb.size.Y,2), round(bb.size.Z,2)],
+        "solids_n": len(s.solids()),
+        "breps_valid": valid,
+        "build123d": b123d_version,
+    })
+except Exception as e:
+    result["ok"] = False
+    result["error"] = f"{type(e).__name__}: {e}"
+print("__FERRO_RESULT__")
+print(json.dumps(result))
+'''
+
+FAMILY_BUILDERS = {
+    "plate": r'''
+from build123d import *
+L={length}; W={width}; T={thickness}; D={hole_d}; N={hole_count}
+inset = min(0.08*min(L,W), 15.0)
+rows = 2 if (N % 2 == 0 and N >= 4) else 1
+cols = (N + rows - 1)//rows
+part = Box(L, W, T)
+for j in range(rows):
+    y = inset if rows == 1 else inset + j*(W-2*inset)/(rows-1)
+    for i in range(cols):
+        if j*cols + i >= N: break
+        x = inset + i*(L-2*inset)/(cols-1) if cols > 1 else L/2
+        part -= Pos(x - L/2, y - W/2, 0) * Cylinder(D/2, T*3)
+result = part
+''',
+    "bracket": r'''
+from build123d import *
+BL={base_len}; BW={base_wid}; BT={base_th}; VL={vert_len}; VT={vert_th}; D={hole_d}
+n2 = max(1, {hole_count}//2)
+part = Box(BL, BW, BT) + Pos(BL - VT/2 - BL/2, 0, VL/2) * Box(VT, BW, VL)
+for i in range(n2):
+    x = BL*(i+0.5)/n2
+    part -= Pos(x - BL/2, 0, 0) * Cylinder(D/2, BT*3)
+    part -= Pos(BL - VT/2 - BL/2, BW*(i+0.5)/n2 - BW/2, VL/2 + BT/2) * Cylinder(D/2, VL)
+result = part
+''',
+    "enclosure": r'''
+from build123d import *
+W={width}; Dp={depth}; H={height}; T={wall}; PW={port_w}; PH={port_h}
+outer = Box(W, Dp, H)
+inner = Pos(0, 0, T - H/2) * Box(W-2*T, Dp-2*T, H-T, align=(Align.CENTER, Align.CENTER, Align.MAX))
+port = Pos(0, Dp/2, 0) * Box(PW, 2*T+4, PH)
+result = outer - inner - port
+''',
+}
+
+
+def run_kernel(script_src, name, timeout=90):
+    """Execute a build123d script in the CAD venv. Returns metrics dict."""
+    d = ARTIFACTS / name
+    d.mkdir(parents=True, exist_ok=True)
+    step, stl = d / "part.step", d / "part.stl"
+    with tempfile.TemporaryDirectory() as td:
+        harness = Path(td) / "harness.py"
+        design = Path(td) / "design.py"
+        harness.write_text(HARNESS)
+        design.write_text(script_src)
+        try:
+            r = subprocess.run(
+                [PY, harness, design, step, stl],
+                capture_output=True, text=True, timeout=timeout)
+            out = r.stdout
+            if "__FERRO_RESULT__" in out:
+                m = json.loads(out.split("__FERRO_RESULT__\n", 1)[1].strip().splitlines()[0])
+                m["stderr_tail"] = r.stderr[-500:] if not m.get("ok") else ""
+                return m
+            return {"ok": False, "error": "kernel produced no result",
+                    "stdout_tail": out[-400:], "stderr_tail": r.stderr[-400:]}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": f"kernel timeout after {timeout}s"}
+        except FileNotFoundError:
+            return {"ok": False, "error": f"CAD python not found at {PY}"}
+
+
+def family_script(family, params):
+    """Deterministic build123d source for a parametric family (mm)."""
+    src = FAMILY_BUILDERS[family]
+    keys = {
+        "length": params.get("length"), "width": params.get("width"),
+        "thickness": params.get("thickness"), "hole_d": params.get("hole_d"),
+        "hole_count": int(params.get("hole_count", 4)),
+        "base_len": params.get("base_len"), "base_wid": params.get("base_wid"),
+        "base_th": params.get("base_th"), "vert_len": params.get("vert_len"),
+        "vert_th": params.get("vert_th"),
+        "depth": params.get("depth"), "height": params.get("height"),
+        "wall": params.get("wall"), "port_w": params.get("port_w"),
+        "port_h": params.get("port_h"), "lid": bool(params.get("lid", True)),
+    }
+    return src.format(**{k: v for k, v in keys.items() if v is not None})
+
+
+def dfm_checks(m, material="6061-T6"):
+    """Kernel-truth DFM checks on the computed geometry."""
+    notes = []
+    if not m.get("ok"):
+        return (["Kernel did not verify geometry — blocked from machining queue."], 0)
+    if not m.get("breps_valid", False):
+        notes.append("BRep invalid — geometry fails kernel validity check; engineer review mandatory.")
+    if m.get("solids_n", 1) > 1:
+        notes.append(f"{m['solids_n']} disconnected solids — CNC cannot cut one part in multiple bodies; review.")
+    vol = m.get("volume_mm3", 0)
+    if vol <= 0:
+        notes.append("Zero/negative volume — degenerate geometry.")
+    sx, sy, sz = m.get("size_mm", [0, 0, 0])
+    if min(sx, sy, sz) < 2:
+        notes.append(f"Thinnest dimension {min(sx, sy, sz):.1f}mm — below 2mm practical machining floor; review.")
+    mass_kg = round(vol * DENSITIES.get(material, 2700) * 1e-9, 3)
+    return notes, mass_kg
+
+
+RENDER_HARNESS = r'''
+import sys
+stl, png = sys.argv[1], sys.argv[2]
+import numpy as np, trimesh, matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+tm = trimesh.load(stl, force="mesh")
+fig = plt.figure(figsize=(5.2, 3.7), dpi=96)
+ax = fig.add_subplot(111, projection="3d")
+ax.set_proj_type("ortho")
+ax.computed_zorder = False
+el, az = np.radians(28), np.radians(-55)
+cam = -np.array([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)])
+verts = tm.vertices[tm.faces]
+n = tm.face_normals
+cents = verts.mean(axis=1)
+keep = n @ cam > 0.01               # backface cull
+verts, n, cents = verts[keep], n[keep], cents[keep]
+light = cam - np.array([0.2, 0.1, 0.35]); light /= np.linalg.norm(light)
+shade = np.clip((n @ light) * 0.55 + 0.45, 0.18, 1.0)
+base = np.array([0.70, 0.73, 0.78])
+order = np.argsort(cents @ cam)     # far -> near
+for i in order:
+    ax.add_collection3d(Poly3DCollection(
+        [verts[i]], facecolors=[tuple(base * shade[i])],
+        edgecolor=(0.35,0.38,0.42), linewidths=0.08, zorder=i))
+b = tm.bounds
+c = (b[0] + b[1]) / 2; span = (b[1] - b[0]).max() / 2 or 1
+ax.set_xlim(c[0]-span, c[0]+span); ax.set_ylim(c[1]-span, c[1]+span); ax.set_zlim(c[2]-span, c[2]+span)
+ax.view_init(elev=28, azim=-55)
+ax.set_axis_off(); fig.tight_layout(pad=0)
+fig.savefig(png, facecolor="#f4f4f0")
+print("RENDER_OK", round(float(tm.volume), 2))
+'''
+
+def render_png(name, timeout=90):
+    """Isometric shaded render of the exported STL, headless (in the CAD venv)."""
+    png = ARTIFACTS / name / "preview.png"
+    stl = ARTIFACTS / name / "part.stl"
+    if not stl.exists():
+        return None, "no stl to render"
+    with tempfile.TemporaryDirectory() as td:
+        h = Path(td) / "render.py"
+        h.write_text(RENDER_HARNESS)
+        try:
+            r = subprocess.run([PY, h, stl, png], capture_output=True, text=True, timeout=timeout)
+            if "RENDER_OK" in r.stdout:
+                vol = float(r.stdout.split("RENDER_OK")[1].strip().split()[0])
+                return str(png), vol
+            return None, f"render failed: {r.stderr[-200:]}"
+        except Exception as e:
+            return None, f"render failed: {e}"

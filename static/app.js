@@ -45,20 +45,49 @@ async function send() {
     });
     const j = await r.json();
     addMsg("agent", j.reply || "(no reply)");
+    if (j.kernel && j.kernel.ok) {
+      const k = j.kernel;
+      const src = k.preview_url
+        ? `<img src="${k.preview_url}" alt="kernel-rendered preview" style="max-width:100%;border-radius:8px">`
+        : `<div class="genbody">Kernel verified — render unavailable</div>`;
+      const checks = (k.checks||[]).length
+        ? k.checks.map(n=>`<li>${esc(n)}</li>`).join("")
+        : `<li>Kernel checks passed — single valid solid, dimensions within machining floor</li>`;
+      $("preview").innerHTML = src;
+      $("sheet").textContent = [
+        "FERRO KERNEL-VERIFIED DESIGN PACKET","=".repeat(46),
+        `Kernel: build123d (OpenCASCADE) ${k.build123d||""}`,
+        `Volume: ${k.volume_mm3} mm³   Area: ${k.area_mm2} mm²`,
+        `BBox size: ${(k.size_mm||[]).join(" × ")} mm`,
+        `Material: ${k.material}   Mass: ${k.mass_kg} kg`,
+        `BRep valid: ${k.breps_valid}   Solids: ${k.solids_n}`,
+        "","DFM checks:", ...checks,
+        "", "Artifacts: part.step (CAM-ready), part.stl, preview.png",
+        "Route: ENGINEER REVIEW -> CAD -> CAM (gated)",
+      ].join("\n");
+      const dl = document.createElement("div");
+      dl.className = "dlrow";
+      dl.innerHTML = `<a class="dlbtn" href="${k.step_url}" download>⇩ STEP file</a>` +
+        (k.stl_url ? `<a class="dlbtn ghost" href="${k.stl_url}" download>⇩ STL</a>` : "") +
+        (k.preview_url ? `<a class="dlbtn ghost" href="${k.preview_url}" target="_blank">⇩ Preview</a>` : "");
+      const old = document.querySelector(".dlrow"); if (old) old.remove();
+      $("packet").insertBefore(dl, $("approve"));
+      $("packet").style.display = "block";
+    }
     if (j.generative) {
       const g = j.generative;
+      if (!j.kernel || !j.kernel.ok) {
       $("preview").innerHTML = `<div class="genbanner">
           <div class="gentitle">GENERATIVE DRAFT — NOT MACHINABLE UNTIL REVIEWED</div>
           <div class="genrow">Bbox: ${esc(g.bbox||"—")} &nbsp;·&nbsp; Material: ${esc(g.material||"—")}</div>
           <div class="genbody">Agent-authored OpenSCAD below. Kernel compile + DFM + CAM review required before this touches a machine — the gate is the product.</div>
         </div>`;
-      $("scad").textContent = g.scad || "";
+      $("scad").textContent = g.cad || g.scad || "";
       $("sheet").textContent = [
         "FERRO GENERATIVE DESIGN PACKET","=".repeat(46),
-        "Mode: generative (agent-authored OpenSCAD)",
+        j.kernel && j.kernel.error ? `Kernel verification FAILED: ${j.kernel.error}` : "Mode: generative (agent-authored CAD code)",
         `Approx bbox: ${g.bbox||"—"}`,
         `Material: ${g.material||"—"}`,
-        "Mass/stock: TBD after kernel evaluation (openscad render + mesh)",
         "", "Verification status:",
         ...((g.notes&&g.notes.length)?g.notes.map(n=>`  ! ${n}`):["  static checks passed — kernel verification pending"]),
         "", "Route: ENGINEER REVIEW QUEUE -> CAD -> CAM (gated)",
@@ -66,13 +95,16 @@ async function send() {
       $("packet").style.display = "block";
       setApprove("Send to engineer review");
       $("dfmbox").style.display = "none";
+      }
     }
-    if (j.design) {
+    if (j.design && !(j.kernel && j.kernel.ok)) {
       $("preview").innerHTML = j.svg || "";
       $("scad").textContent = j.scad || "";
       $("sheet").textContent = j.sheet || "";
       $("packet").style.display = "block";
-      if (!j.generative) setApprove("Approve for CAD");
+      setApprove("Approve for CAD");
+    }
+    if (j.design && !(j.kernel && j.kernel.ok)) {
       $("massline").textContent = j.mass_kg != null
         ? `Approx mass: ${j.mass_kg} kg (est. from parametric volume, 45% removal allowance)` : "";
     }

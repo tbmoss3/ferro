@@ -35,20 +35,26 @@ full parameter list in your prose so the customer can catch any drift.
 
 MODE 2 — GENERATIVE (any part that does not fit a family: brackets with gussets,
 V-blocks, fixtures, spacers, hinges, custom frames, sculptural parts, etc.).
-Write complete OpenSCAD source (valid, self-contained, $fn>=64, mm units) that
-produces the part. END your message with:
-```scad
-// GENERATIVE DESIGN — REQUIRES CAM REVIEW
-// bbox: <approx W x D x H mm>
-// material: <stock material>
-// notes: <one line on machining approach>
-<complete OpenSCAD source>
+Write complete build123d Python (the OpenCASCADE CAD kernel, mm units) that builds
+the part. Your code runs in a real CAD kernel and is verified automatically — if it
+fails, you get the error back and must fix it. END your message with:
+```cad
+# GENERATIVE DESIGN — REQUIRES CAM REVIEW
+# bbox: <approx W x D x H mm>
+# material: <stock material>
+# notes: <one line on machining approach>
+from build123d import *
+<complete build123d source>
+result = <the finished part>
 ```
 Rules for generative mode:
-- Prefer primitive combinations (cube/cylinder/hull) over obscure functions.
-- Put holes/cutouts as difference() from the solid, clean edges.
-- State assumed stock size in the header comment.
+- Only use build123d algebra/builder API: Box, Cylinder, Pos, Rot, GridLocations,
+  extrude, fillet, chamfer, subtract with `-`, etc. mm units. No imports besides
+  build123d. Do NOT call export_* — the kernel does that.
+- End with `result = <part>` where <part> is a single solid (BuildPart context:
+  `result = p.part`).
 - Be conservative: simple, machinable geometry. No threads, no text engraving.
+- State assumed stock size in the header comment.
 - Always say in prose that this draft needs engineer review before machining.
 
 Materials in stock: 6061-T6, 7075-T6, steel-1018, 304-SS, delrin.
@@ -126,6 +132,20 @@ def ask_hermes(prompt, timeout=150):
 
 DESIGN_RE = re.compile(r"```design\s*(\{.*?\})\s*```", re.S)
 SCAD_RE = re.compile(r"```scad\s*\n(.*?)```", re.S)
+CAD_RE = re.compile(r"```cad\s*\n(.*?)```", re.S)
+
+
+def parse_cad_block(out):
+    m = CAD_RE.search(out)
+    if not m:
+        return None, None
+    src = m.group(1).strip()
+    header = {}
+    for line in src.splitlines()[:6]:
+        mm = re.match(r"#\s*(bbox|material|notes)\s*:\s*(.+)", line.strip())
+        if mm:
+            header[mm.group(1)] = mm.group(2).strip()
+    return src, header
 
 def validate_scad(src):
     """Lightweight static checks (real kernel verification needs openscad)."""
@@ -176,13 +196,19 @@ def process(message, st):
         reply, design, extra = fallback_reply(message)
     else:
         reply, design = out, None
-        # generative mode first: a ```scad block means bespoke geometry
-        src, header, scad_notes = parse_scad_block(out)
-        if src:
-            gen = {"scad": src, "header": header, "notes": scad_notes}
-            reply = SCAD_RE.sub("", out).strip()
+        # generative mode first: ```cad (build123d) preferred, ```scad legacy
+        cad_src, cad_header = parse_cad_block(out)
+        if cad_src:
+            gen = {"cad": cad_src, "header": cad_header, "notes": []}
+            reply = CAD_RE.sub("", out).strip()
             st["design"] = None  # generative replaces parametric state
         else:
+            src, header, scad_notes = parse_scad_block(out)
+            if src:
+                gen = {"scad": src, "header": header, "notes": scad_notes}
+                reply = SCAD_RE.sub("", out).strip()
+                st["design"] = None
+        if not gen:
             m = DESIGN_RE.search(out)
             if m:
                 try:
@@ -207,28 +233,115 @@ def process(message, st):
 
 app = FastAPI()
 
+def kernel_verify(session, clean=None, gen_src=None, header=None):
+    """Run the build123d kernel. Returns (metrics, checks, mass, preview_ok) or
+    (None, reason) if the CAD python is unavailable on this host."""
+    try:
+        import cad_kernel as K
+    except Exception:
+        return None, "kernel not installed on this host"
+    material = (header or {}).get("material") or (clean or {}).get("material", "6061-T6")
+    material = material.split(",")[0].strip()
+    if material not in K.DENSITIES:
+        material = "6061-T6"
+    name = session
+    if gen_src is not None:
+        m = K.run_kernel(gen_src, name)
+    elif clean is not None:
+        try:
+            src = K.family_script(clean["family"], clean)
+        except KeyError:
+            return None, f"no family builder for {clean['family']}"
+        m = K.run_kernel(src, name)
+    else:
+        return None, "nothing to verify"
+    if not m.get("ok"):
+        return m, m.get("error", "kernel failed")
+    checks, mass = K.dfm_checks(m, material)
+    png, _ = K.render_png(name)
+    m["mass_kg"] = mass
+    m["material"] = material
+    m["checks"] = checks
+    m["preview_url"] = f"/artifacts/{name}/preview.png" if png else None
+    return m, checks
+
 @app.post("/chat")
 async def chat(req: Request):
     body = await req.json()
     st = load_state(body.get("session", "default"))
     reply, design, notes, gen = process(body.get("message", ""), st)
+
+    # generative: kernel verification with one auto-repair retry
+    kernel = None
+    if gen and gen.get("scad") is None and gen.get("cad"):
+        km, err = kernel_verify(body["session"], gen_src=gen["cad"], header=gen.get("header"))
+        if km is not None and not km.get("ok"):
+            # auto-repair: feed the kernel error back to the agent once
+            fix_prompt = build_prompt(st, (
+                f"[KERNEL FEEDBACK — your build123d code failed verification]\n"
+                f"{err}\nRewrite the COMPLETE corrected ```cad block. Prose: one line."))
+            out2, ok2 = ask_hermes(fix_prompt)
+            if ok2:
+                src2, header2 = parse_cad_block(out2)
+                if src2:
+                    gen = {"cad": src2, "header": header2 or gen.get("header"), "notes": []}
+                    reply = CAD_RE.sub("", out2).strip() or reply
+                    st["history"].append({"role": "agent", "text": reply})
+                    km, err = kernel_verify(body["session"], gen_src=src2, header=header2)
+        kernel = km
+    elif design:
+        km, err = kernel_verify(body["session"], clean=design)
+        if km is not None:
+            kernel = km
+            if km.get("ok"):
+                design["mass_kg"] = km.get("mass_kg")
+
     save_state(body["session"], st)
     resp = {"reply": reply, "dfm_notes": notes}
     if gen:
         h = gen.get("header", {})
         resp["generative"] = {
-            "scad": gen["scad"],
+            "cad": gen.get("cad") or gen.get("scad", ""),
             "bbox": h.get("bbox", ""),
             "material": h.get("material", ""),
-            "notes": gen["notes"],
+            "notes": gen.get("notes", []),
+        }
+    if kernel:
+        resp["kernel"] = {
+            "ok": kernel.get("ok"),
+            "error": kernel.get("error"),
+            "volume_mm3": kernel.get("volume_mm3"),
+            "area_mm2": kernel.get("area_mm2"),
+            "size_mm": kernel.get("size_mm"),
+            "mass_kg": kernel.get("mass_kg"),
+            "material": kernel.get("material"),
+            "solids_n": kernel.get("solids_n"),
+            "breps_valid": kernel.get("breps_valid"),
+            "checks": kernel.get("checks", []),
+            "preview_url": kernel.get("preview_url"),
+            "step_url": f"/artifacts/{body['session']}/part.step",
+            "stl_url": f"/artifacts/{body['session']}/part.stl",
         }
     if design:
         resp.update(design={
             "family": design["family"], "params": design},
             svg=T.render_svg(design), scad=T.render_scad(design),
             sheet=T.spec_sheet(design, notes),
-            mass_kg=T.mass_kg(design))
+            mass_kg=design.get("mass_kg", T.mass_kg(design)))
     return resp
+
+from fastapi.responses import FileResponse
+
+@app.get("/artifacts/{name}/{fn}")
+def artifact(name: str, fn: str):
+    if "/" in fn or ".." in fn or "/" in name or ".." in name:
+        return {"error": "bad path"}
+    p = ROOT / "artifacts" / name / fn
+    if not p.exists():
+        return {"error": "not found"}
+    media = {"part.step": "application/step", "part.stl": "model/stl",
+             "preview.png": "image/png"}.get(fn, "application/octet-stream")
+    return FileResponse(p, media_type=media, filename=fn)
 
 @app.get("/health")
 def health():

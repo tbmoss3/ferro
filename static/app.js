@@ -43,7 +43,20 @@ async function send() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({session: sessionId, message: text}),
     });
-    const j = await r.json();
+    const q = await r.json();
+    let j = q;
+    if (q.accepted) {
+      // async job: poll until the agent + CAD kernel finish
+      for (let i = 0; i < 200; i++) {
+        await new Promise(res => setTimeout(res, 2000));
+        const pr = await fetch(`/result/${sessionId}`);
+        const p = await pr.json();
+        if (p.status === "done" || p.status === "error") { j = p.result || {reply: "[no result]"}; break; }
+        $("status").innerHTML = '<span class="dots"><i></i><i></i><i></i></span> ' +
+          (i % 2 ? "agent drafting design" : "CAD kernel verifying geometry");
+      }
+      if (j.accepted) { throw new Error("timed out waiting for the design engine"); }
+    }
     addMsg("agent", j.reply || "(no reply)");
     if (j.kernel && j.kernel.ok) {
       const k = j.kernel;

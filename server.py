@@ -265,16 +265,19 @@ def kernel_verify(session, clean=None, gen_src=None, header=None):
     m["preview_url"] = f"/artifacts/{name}/preview.png" if png else None
     return m, checks
 
-@app.post("/chat")
-async def chat(req: Request):
-    body = await req.json()
-    st = load_state(body.get("session", "default"))
-    reply, design, notes, gen = process(body.get("message", ""), st)
+import threading
+
+RESULTS = {}   # session -> {"status": "working"/"done"/"error", "result": resp}
+LOCKS = {}
+
+def _build_reply(session, message):
+    st = load_state(session)
+    reply, design, notes, gen = process(message, st)
 
     # generative: kernel verification with one auto-repair retry
     kernel = None
     if gen and gen.get("scad") is None and gen.get("cad"):
-        km, err = kernel_verify(body["session"], gen_src=gen["cad"], header=gen.get("header"))
+        km, err = kernel_verify(session, gen_src=gen["cad"], header=gen.get("header"))
         if km is not None and not km.get("ok"):
             # auto-repair: feed the kernel error back to the agent once
             fix_prompt = build_prompt(st, (
@@ -287,16 +290,16 @@ async def chat(req: Request):
                     gen = {"cad": src2, "header": header2 or gen.get("header"), "notes": []}
                     reply = CAD_RE.sub("", out2).strip() or reply
                     st["history"].append({"role": "agent", "text": reply})
-                    km, err = kernel_verify(body["session"], gen_src=src2, header=header2)
+                    km, err = kernel_verify(session, gen_src=src2, header=header2)
         kernel = km
     elif design:
-        km, err = kernel_verify(body["session"], clean=design)
+        km, err = kernel_verify(session, clean=design)
         if km is not None:
             kernel = km
             if km.get("ok"):
                 design["mass_kg"] = km.get("mass_kg")
 
-    save_state(body["session"], st)
+    save_state(session, st)
     resp = {"reply": reply, "dfm_notes": notes}
     if gen:
         h = gen.get("header", {})
@@ -319,8 +322,8 @@ async def chat(req: Request):
             "breps_valid": kernel.get("breps_valid"),
             "checks": kernel.get("checks", []),
             "preview_url": kernel.get("preview_url"),
-            "step_url": f"/artifacts/{body['session']}/part.step",
-            "stl_url": f"/artifacts/{body['session']}/part.stl",
+            "step_url": f"/artifacts/{session}/part.step",
+            "stl_url": f"/artifacts/{session}/part.stl",
         }
     if design:
         resp.update(design={
@@ -329,6 +332,33 @@ async def chat(req: Request):
             sheet=T.spec_sheet(design, notes),
             mass_kg=design.get("mass_kg", T.mass_kg(design)))
     return resp
+
+def _worker(session, message):
+    try:
+        RESULTS[session] = {"status": "working"}
+        RESULTS[session] = {"status": "done", "result": _build_reply(session, message)}
+    except Exception as e:
+        RESULTS[session] = {"status": "error", "result": {"reply": f"[error] {e}"}}
+
+@app.post("/chat")
+async def chat(req: Request):
+    body = await req.json()
+    session = body.get("session", "default")
+    message = body.get("message", "")
+    lock = LOCKS.setdefault(session, threading.Lock())
+    with lock:
+        cur = RESULTS.get(session, {})
+        if cur.get("status") == "working":
+            return {"accepted": True, "status": "working", "session": session}
+        threading.Thread(target=_worker, args=(session, message), daemon=True).start()
+    return {"accepted": True, "status": "queued", "session": session}
+
+@app.get("/result/{session}")
+def result(session: str):
+    cur = RESULTS.get(session)
+    if not cur:
+        return {"status": "none"}
+    return {"status": cur["status"], "result": cur.get("result")}
 
 from fastapi.responses import FileResponse
 

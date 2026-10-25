@@ -10,6 +10,7 @@
           --txt:#ecebe6; --dim:#a3aab6; --faint:#77808f;
           --acc:#e8853d; --acc-hi:#f79a55; --ok:#7fb069; }
   * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
   html, body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--txt);
          font-family:'Inter',system-ui,-apple-system,sans-serif;
@@ -22,6 +23,10 @@
   a { color:var(--dim); text-decoration:none; }
   a:hover { color:var(--acc); }
   :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:6px; }
+  /* anchor targets clear the sticky header + flash so clicks feel real */
+  #how, #materials, #app { scroll-margin-top:86px; }
+  #how:target, #materials:target { animation:flash 1.8s ease-out; }
+  @keyframes flash { 0%{background:rgba(232,133,61,.16)} 100%{background:transparent} }
 
   /* ---------- HERO ---------- */
   .hero { position:relative; min-height:88vh; display:flex; flex-direction:column;
@@ -174,6 +179,16 @@
 </style>
 </head><body>
 
+<header>
+  <h1>FERRO<span>.</span></h1>
+  <div class="tag">bespoke CNC parts — describe it, approve it, we cut it.</div>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#materials">Materials</a>
+    <a href="#app">Design agent</a>
+  </nav>
+</header>
+
 <div class="hero" id="top">
   <video autoplay muted loop playsinline preload="auto">
     <source src="/static/video/cnc.mp4" type="video/mp4">
@@ -186,7 +201,7 @@
       <span class="badge"> verified by a real cad kernel </span>
       <span class="badge"> design in days, not months </span>
     </div>
-    <h2>Chips should fly because<br>of <em>your idea</em> —<br>not your lead time.</h2>
+    <h2><em>IMAGINE.</em> DESIGN. <em>BUILD.</em></h2>
     <p class="sub">Ferro turns a plain-English description into a verified, machinable design —
       interrogated by an agent, computed by a real CAD kernel, checked for manufacturability,
       and handed to the shop floor as a STEP file. You talk. It cuts.</p>
@@ -198,15 +213,6 @@
   <div class="scroll-hint">↓ the workshop</div>
 </div>
 
-<header>
-  <h1>FERRO<span>.</span></h1>
-  <div class="tag">bespoke CNC parts — describe it, approve it, we cut it.</div>
-  <nav>
-    <a href="#how">How it works</a>
-    <a href="#materials">Materials</a>
-    <a href="#app">Design agent</a>
-  </nav>
-</header>
 <div class="steps" id="how">
   <div><b>1</b>Describe the part — plain English, mm or inches</div>
   <div><b>2</b>Iterate with the agent until it's right</div>
@@ -222,6 +228,9 @@
       <div class="chip" onclick="startWith('I need a V-block for holding 50mm round stock while milling a flat on it, aluminum, two clamp screw holes')">V-block</div>
       <div class="chip" onclick="startWith('A round flange, 90mm OD, 25mm bore, four M6 bolts on a 68mm circle, 10mm thick, 6061')">Flange</div>
       <div class="chip" onclick="startWith('A shaft collar, 40mm OD, 12mm bore, 15mm wide, with a set screw, steel')">Shaft collar</div>
+      <div class="chip" onclick="startWith('A tube rack for 15ml centrifuge tubes, 6x8 grid on 19mm pitch, 316L stainless, 40mm deep blind holes')">Tube rack</div>
+      <div class="chip" onclick="startWith('A saddle clamp block for 1/2 inch HPLC tubing, 6161 or 316L, two M4 mounting holes, groove half depth')">Tube clamp</div>
+      <div class="chip" onclick="startWith('A breadboard base plate, 300 x 200, 10mm thick 6061, M6 holes on a 25mm grid')">Breadboard</div>
       <div class="chip" onclick="newChat()">↺ New conversation</div>
     </div>
     <div class="box intake"><h3>Design intake <em>· live agent + CAD kernel</em></h3>
@@ -234,6 +243,7 @@
           <span class="ex" onclick="startWith('I need an L-bracket to mount a 3HP motor to a steel frame, 6061, 4 mounting holes')">→ Motor-mount bracket, 6061</span>
           <span class="ex" onclick="startWith('A round flange, 90mm OD, 25mm bore, four M6 bolts on a 68mm circle, 10mm thick, 6061')">→ Bolt-circle flange</span>
           <span class="ex" onclick="startWith('I need a V-block for holding 50mm round stock while milling a flat on it, aluminum, two clamp screw holes')">→ V-block fixture for 50mm stock</span>
+          <span class="ex" onclick="startWith('A tube rack for 15ml centrifuge tubes, 6x8 grid on 19mm pitch, 316L stainless, 40mm deep blind holes')">→ Pharma: 15ml centrifuge-tube rack, 316L</span>
         </div>
       </div>
       <div id="status" aria-live="polite"></div>
@@ -260,7 +270,7 @@
       <div class="materials">
         <div><b>6061-T6 / 7075-T6</b> aluminum</div>
         <div><b>1018 steel · 304/316 SS</b></div>
-        <div><b>Delrin</b> &amp; engineering plastics</div>
+        <div><b>316L · PEEK · Delrin</b> (pharma/biotech)</div>
         <div><b>2.5D + flips</b> (5-axis: roadmap)</div>
       </div>
       <div class="specs">
@@ -268,6 +278,7 @@
         <div class="spec"><b>Tolerances</b>±0.05 mm typical</div>
         <div class="spec"><b>DFM feedback</b>on every draft</div>
         <div class="spec"><b>Units</b>mm (inches on request)</div>
+        <div class="spec"><b>Material certs</b>mill certs on request</div>
       </div>
     </div>
   </div>

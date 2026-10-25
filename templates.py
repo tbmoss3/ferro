@@ -31,6 +31,21 @@ SCHEMAS = {
     "shaft_collar": dict(
         od=40.0, bore=12.0, width=15.0, set_screw_d=5.0,
     ),
+    # biotech: centrifuge/tube rack — grid of blind holes in a walled base
+    "tube_rack": dict(
+        rows=8, cols=6, hole_d=16.5, pitch=19.0,
+        base_th=45.0, hole_depth=40.0, wall=10.0,
+    ),
+    # biotech: saddle clamp block for tubing/HPLC lines
+    "tube_clamp": dict(
+        tube_od=12.7, block_len=40.0, block_wid=25.0,
+        block_th=15.0, hole_d=4.5, hole_count=2,
+    ),
+    # optics/breadboard: grid of holes on a pitch
+    "grid_plate": dict(
+        length=300.0, width=200.0, thickness=10.0,
+        rows=8, cols=12, hole_d=6.6, pitch=25.0,
+    ),
 }
 
 PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
@@ -46,6 +61,10 @@ PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
     "set_screw_d": (2, 12),
     # shaft collar axial width — turning can hold thin rings fine
     "width": (2, 400),
+    "rows": (1, 24), "cols": (1, 24),
+    "base_th": (5, 150), "hole_depth": (3, 140), "wall": (3, 40),
+    "tube_od": (2, 100), "block_len": (15, 200), "block_wid": (10, 150),
+    "block_th": (5, 80), "pitch": (8, 200),
     "w": None, "d": None, "h": None,  # unused keys allowed
     # enclosure dims handled via width/depth/height keys; alias below
 }
@@ -54,7 +73,7 @@ ALIAS = {"w": "width", "d": "depth", "h": "height", "t": "thickness",
          "th": "thickness", "len": "length", "wid": "width"}
 
 MATERIALS = {"6061-T6": 2.70e-6, "7075-T6": 2.81e-6, "steel-1018": 7.87e-6,
-             "304-SS": 7.90e-6, "delrin": 1.41e-6}  # kg/mm^3
+             "304-SS": 7.90e-6, "316L": 8.00e-6, "PEEK": 1.32e-6, "delrin": 1.41e-6}  # kg/mm^3
 
 
 def normalize(family, params):
@@ -93,6 +112,9 @@ def normalize(family, params):
         clean[k] = round(v, 2)
     if "hole_count" in clean:
         clean["hole_count"] = int(clean["hole_count"])
+    for ik in ("rows", "cols"):
+        if ik in clean:
+            clean[ik] = int(clean[ik])
     if family == "enclosure":
         if clean.get("wall", 3.0) < clean.get("thickness", 0) / 10:
             pass
@@ -124,6 +146,35 @@ def normalize(family, params):
     if family == "shaft_collar":
         if clean["bore"] + 2 * clean["set_screw_d"] >= clean["od"] - 2:
             notes.append("Set screw too large for wall — clamp load may split the collar; reduce set_screw_d.")
+    if family == "tube_rack":
+        if clean["hole_d"] + 3 > clean["pitch"]:
+            clean["pitch"] = round(clean["hole_d"] + 3, 2)
+            notes.append(f"Hole pitch widened to {clean['pitch']}mm — keep ≥1.5mm wall between adjacent wells.")
+        if clean["hole_depth"] > clean["base_th"] - 2:
+            clean["hole_depth"] = round(clean["base_th"] - 2, 2)
+            notes.append("Well depth clipped to leave ≥2mm floor.")
+        if clean["wall"] < 4:
+            clean["wall"] = 4.0
+            notes.append("Side wall raised to 4mm minimum for handling stiffness.")
+    if family == "tube_clamp":
+        if clean["tube_od"] / 2 > clean["block_wid"] * 0.8:
+            clean["tube_od"] = round(clean["block_wid"] * 1.6, 2)
+            notes.append("Tube groove too wide for block — groove radius capped at 80% of block width.")
+        edge = (clean["block_len"] - clean["tube_od"]) / 4
+        if clean["hole_d"] > 2 * edge / 3:
+            notes.append("Bolt holes close to groove/edges — keep ≥2×D edge distance; lengthen the block.")
+    if family == "grid_plate":
+        if clean["hole_d"] + 3 > clean["pitch"]:
+            clean["pitch"] = round(clean["hole_d"] + 3, 2)
+            notes.append(f"Grid pitch widened to {clean['pitch']}mm — keep ≥1.5mm material between holes.")
+        clean["cols"] = max(2, min(clean["cols"], int(clean["length"] // clean["pitch"])))
+        clean["rows"] = max(2, min(clean["rows"], int(clean["width"] // clean["pitch"])))
+        if clean["cols"] * clean["pitch"] > clean["length"] + 10:
+            clean["length"] = round(clean["cols"] * clean["pitch"], 2)
+            notes.append("Plate length grown to fit the grid.")
+        if clean["rows"] * clean["pitch"] > clean["width"] + 10:
+            clean["width"] = round(clean["rows"] * clean["pitch"], 2)
+            notes.append("Plate width grown to fit the grid.")
     clean["family"] = family
     if "material" not in clean:
         clean["material"] = "6061-T6"
@@ -187,6 +238,40 @@ def _boxes(p):
     if fam == "shaft_collar":
         boxes = [(p["od"] / 2, p["od"] / 2, 0, p["od"], p["od"], p["width"])]
         return boxes, []
+    if fam == "tube_rack":
+        L = p["cols"] * p["pitch"] + 2 * p["wall"]
+        W = p["rows"] * p["pitch"] + 2 * p["wall"]
+        boxes = [(0, 0, 0, L, W, p["base_th"])]
+        holes = []
+        x0 = p["wall"] + p["pitch"] / 2
+        y0 = p["wall"] + p["pitch"] / 2
+        for j in range(p["rows"]):
+            for i in range(p["cols"]):
+                holes.append((x0 + i * p["pitch"], y0 + j * p["pitch"],
+                              0, "z", p["hole_d"]))
+        return boxes, holes
+    if fam == "tube_clamp":
+        L, W, T = p["block_len"], p["block_wid"], p["block_th"]
+        boxes = [(0, 0, 0, L, W, T)]
+        holes = [(L / 2, W / 2, 0, "z", p["tube_od"] * 0.7, "groove")]
+        n2 = max(1, int(p["hole_count"]) // 2)
+        for i in range(n2):
+            holes.append((p["tube_od"] / 2 + p["hole_d"] / 2 + 2,
+                          W / 2, 0, "z", p["hole_d"]))
+            holes.append((L - p["tube_od"] / 2 - p["hole_d"] / 2 - 2,
+                          W / 2, 0, "z", p["hole_d"]))
+        return boxes, holes
+    if fam == "grid_plate":
+        L, W = p["length"], p["width"]
+        boxes = [(0, 0, 0, L, W, p["thickness"])]
+        holes = []
+        gx = p["pitch"] / 2 + (L - p["cols"] * p["pitch"]) / 2
+        gy = p["pitch"] / 2 + (W - p["rows"] * p["pitch"]) / 2
+        for j in range(p["rows"]):
+            for i in range(p["cols"]):
+                holes.append((gx + i * p["pitch"], gy + j * p["pitch"],
+                              0, "z", p["hole_d"]))
+        return boxes, holes
     return [], []
 
 

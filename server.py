@@ -26,9 +26,13 @@ MODE 1 — PARAMETRIC (preferred when it fits). Parametric engine families (mm):
 - flange: od, bore, thickness, bcd (bolt circle), bolt_count, bolt_d
 - spacer: od, bore, thickness
 - shaft_collar: od, bore, width, set_screw_d
+- tube_rack: rows, cols, hole_d, pitch, base_th, hole_depth, wall (lab/pharma racks)
+- tube_clamp: tube_od, block_len, block_wid, block_th, hole_d, hole_count (saddle clamps)
+- grid_plate: length, width, thickness, rows, cols, hole_d, pitch (breadboards/optics)
+Stock materials: 6061-T6, 7075-T6, steel-1018, 304-SS, 316L, PEEK, delrin.
 If the request fits (or nearly fits) a family, END your message with:
 ```design
-{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar>", "params": {...}, "material": "6061-T6"}
+{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar|tube_rack|tube_clamp|grid_plate>", "params": {...}, "material": "6061-T6"}
 ```
 Include absolute values for the keys you're setting. On edits, re-emit the FULL set.
 MANDATORY SELF-CHECK before replying: re-read the customer's message and verify every
@@ -60,7 +64,7 @@ Rules for generative mode:
 - State assumed stock size in the header comment.
 - Always say in prose that this draft needs engineer review before machining.
 
-Materials in stock: 6061-T6, 7075-T6, steel-1018, 304-SS, delrin.
+Materials in stock: 6061-T6, 7075-T6, steel-1018, 304-SS, 316L, PEEK, delrin.
 
 RULES (both modes):
 1. Reply conversationally — brief, concrete, engineer-to-engineer. No fluff.

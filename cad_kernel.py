@@ -14,7 +14,7 @@ PY = os.environ.get("FERRO_CAD_PY") or str(ROOT / ".venv-cad" / "bin" / "python"
 # kg/m^3 — must mirror templates.MATERIALS densities (kg/mm^3 * 1e9)
 DENSITIES = {
     "6061-T6": 2700, "7075-T6": 2810, "steel-1018": 7870,
-    "304-SS": 7900, "delrin": 1410,
+    "304-SS": 7900, "316L": 8000, "PEEK": 1320, "delrin": 1410,
 }
 
 # runs INSIDE the cad subprocess (written to a temp script, run with PY)
@@ -122,6 +122,44 @@ OD={od}; B={bore}; W_{0}={width}; SS={set_screw_d}
 result = Cylinder(OD/2, W_{0}) - Cylinder(B/2, W_{0}*3)
 result -= Pos(0, OD/2, 0) * Cylinder(SS/2, OD/2)   # radial set-screw hole
 '''.replace("W_{0}", "Wt"),
+    "tube_rack": r'''
+from build123d import *
+import math
+R_{0}={rows}; C_{0}={cols}; D={hole_d}; P={pitch}; T={base_th}; DEP={hole_depth}; WL={wall}
+L = C_{0}*P + 2*WL
+W = R_{0}*P + 2*WL
+result = Box(L, W, T)
+x0 = -L/2 + WL + P/2
+y0 = -W/2 + WL + P/2
+z0 = T/2          # cut from the top face down
+for j in range(R_{0}):
+    for i in range(C_{0}):
+        result -= Pos(x0 + i*P, y0 + j*P, z0 - DEP/2) * Cylinder(D/2, DEP)
+'''.replace("R_{0}", "Rr").replace("C_{0}", "Cc"),
+    "tube_clamp": r'''
+from build123d import *
+import math
+TO={tube_od}; L={block_len}; W={block_wid}; T={block_th}; D={hole_d}; N={hole_count}
+result = Box(L, W, T)
+# saddle groove: half-cylinder cut along the top, along the length
+result -= Pos(0, 0, T/2) * Rot(0, 90, 90) * Cylinder(TO/2, L*3)
+# mounting holes flanking the groove
+n2 = max(1, N//2)
+for i in range(n2):
+    x = TO/2 + D/2 + 2
+    result -= Pos(-x, 0, 0) * Cylinder(D/2, T*3)
+    result -= Pos(x, 0, 0) * Cylinder(D/2, T*3)
+''',
+    "grid_plate": r'''
+from build123d import *
+L={length}; W={width}; T={thickness}; R_{0}={rows}; C_{0}={cols}; D={hole_d}; P={pitch}
+result = Box(L, W, T)
+gx = -L/2 + P/2 + (L - C_{0}*P)/2
+gy = -W/2 + P/2 + (W - R_{0}*P)/2
+for j in range(R_{0}):
+    for i in range(C_{0}):
+        result -= Pos(gx + i*P, gy + j*P, 0) * Cylinder(D/2, T*3)
+'''.replace("R_{0}", "Rr").replace("C_{0}", "Cc"),
 }
 
 
@@ -168,6 +206,11 @@ def family_script(family, params):
         "od": params.get("od"), "bore": params.get("bore"),
         "bcd": params.get("bcd"), "bolt_count": int(params.get("bolt_count", 4)),
         "bolt_d": params.get("bolt_d"), "set_screw_d": params.get("set_screw_d"),
+        "rows": int(params.get("rows", 8)), "cols": int(params.get("cols", 6)),
+        "pitch": params.get("pitch"), "base_th": params.get("base_th"),
+        "hole_depth": params.get("hole_depth"), "wall": params.get("wall"),
+        "tube_od": params.get("tube_od"), "block_len": params.get("block_len"),
+        "block_wid": params.get("block_wid"), "block_th": params.get("block_th"),
     }
     return src.format(**{k: v for k, v in keys.items() if v is not None})
 
@@ -197,27 +240,35 @@ stl, png = sys.argv[1], sys.argv[2]
 import numpy as np, trimesh, matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from matplotlib.colors import LightSource
 tm = trimesh.load(stl, force="mesh")
 fig = plt.figure(figsize=(5.2, 3.7), dpi=96)
 ax = fig.add_subplot(111, projection="3d")
 ax.set_proj_type("ortho")
 ax.computed_zorder = False
+v = tm.vertices; f = tm.faces
+# camera for view_init(28,-55): eye direction
 el, az = np.radians(28), np.radians(-55)
 cam = -np.array([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)])
-verts = tm.vertices[tm.faces]
-n = tm.face_normals
-cents = verts.mean(axis=1)
-keep = n @ cam > 0.01               # backface cull
-verts, n, cents = verts[keep], n[keep], cents[keep]
-light = cam - np.array([0.2, 0.1, 0.35]); light /= np.linalg.norm(light)
-shade = np.clip((n @ light) * 0.55 + 0.45, 0.18, 1.0)
+keep = tm.face_normals @ cam > 0.02
+# skip dense meshes in the browser-render path? no: decimate to a face budget
+if keep.sum() > 40000:
+    idx = np.flatnonzero(keep)
+    keep = np.zeros(len(f), bool); keep[idx[np.linspace(0, len(idx)-1, 40000).astype(int)]] = True
+vt = v[f]
+x, y, z = vt[:, :, 0], vt[:, :, 1], vt[:, :, 2]
+ls = LightSource(azdeg=35, altdeg=55)
+norm = tm.face_normals[keep]
+light = np.array([np.cos(np.radians(55))*np.cos(np.radians(35)),
+                  np.cos(np.radians(55))*np.sin(np.radians(35)),
+                  np.sin(np.radians(55))])
+shade = np.clip(norm @ light, -1, 1) * 0.55 + 0.45
 base = np.array([0.70, 0.73, 0.78])
-order = np.argsort(cents @ cam)     # far -> near
-for i in order:
-    ax.add_collection3d(Poly3DCollection(
-        [verts[i]], facecolors=[tuple(base * shade[i])],
-        edgecolor=(0.35,0.38,0.42), linewidths=0.08, zorder=i))
+cols = np.clip(shade[:, None] * base[None, :], 0.18, 1.0)
+ax.plot_trisurf(v[:, 0], v[:, 1], v[:, 2], triangles=f[keep],
+                color="#dfe3e9", shade=True,
+                lightsource=LightSource(azdeg=35, altdeg=55),
+                edgecolor=(0.32, 0.35, 0.4), linewidth=0.05, antialiased=False)
 b = tm.bounds
 c = (b[0] + b[1]) / 2; span = (b[1] - b[0]).max() / 2 or 1
 ax.set_xlim(c[0]-span, c[0]+span); ax.set_ylim(c[1]-span, c[1]+span); ax.set_zlim(c[2]-span, c[2]+span)

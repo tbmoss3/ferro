@@ -99,6 +99,29 @@ inner = Pos(0, 0, T - H/2) * Box(W-2*T, Dp-2*T, H-T, align=(Align.CENTER, Align.
 port = Pos(0, Dp/2, 0) * Box(PW, 2*T+4, PH)
 result = outer - inner - port
 ''',
+    "flange": r'''
+from build123d import *
+import math
+OD={od}; B={bore}; T={thickness}; BCD={bcd}; N={bolt_count}; BD={bolt_d}
+disc = Cylinder(OD/2, T)
+bore = Cylinder(B/2, T*3)
+result = disc - bore
+R = OD/2; rb = BCD/2
+for i in range(N):
+    a = 2*math.pi*i/N
+    result -= Pos(rb*math.cos(a), rb*math.sin(a), 0) * Cylinder(BD/2, T*3)
+''',
+    "spacer": r'''
+from build123d import *
+OD={od}; B={bore}; T={thickness}
+result = Cylinder(OD/2, T) - Cylinder(B/2, T*3)
+''',
+    "shaft_collar": r'''
+from build123d import *
+OD={od}; B={bore}; W_{0}={width}; SS={set_screw_d}
+result = Cylinder(OD/2, W_{0}) - Cylinder(B/2, W_{0}*3)
+result -= Pos(0, OD/2, 0) * Cylinder(SS/2, OD/2)   # radial set-screw hole
+'''.replace("W_{0}", "Wt"),
 }
 
 
@@ -142,6 +165,9 @@ def family_script(family, params):
         "depth": params.get("depth"), "height": params.get("height"),
         "wall": params.get("wall"), "port_w": params.get("port_w"),
         "port_h": params.get("port_h"), "lid": bool(params.get("lid", True)),
+        "od": params.get("od"), "bore": params.get("bore"),
+        "bcd": params.get("bcd"), "bolt_count": int(params.get("bolt_count", 4)),
+        "bolt_d": params.get("bolt_d"), "set_screw_d": params.get("set_screw_d"),
     }
     return src.format(**{k: v for k, v in keys.items() if v is not None})
 

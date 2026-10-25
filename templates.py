@@ -18,6 +18,19 @@ SCHEMAS = {
         width=120.0, depth=80.0, height=50.0, wall=3.0,
         lid=True, vents=True, port_w=30.0, port_h=15.0,
     ),
+    # round flange / bearing mount: bolt circle
+    "flange": dict(
+        od=90.0, bore=25.0, thickness=10.0,
+        bcd=68.0, bolt_count=4, bolt_d=6.6,
+    ),
+    # spacer / tube: plain ring
+    "spacer": dict(
+        od=30.0, bore=10.0, thickness=15.0,
+    ),
+    # shaft collar: ring + set-screw hole
+    "shaft_collar": dict(
+        od=40.0, bore=12.0, width=15.0, set_screw_d=5.0,
+    ),
 }
 
 PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
@@ -28,6 +41,11 @@ PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
     "corner_r": (0, 20),
     "wall": (1.5, 12), "lid": (0, 1), "vents": (0, 1),
     "port_w": (5, 80), "port_h": (5, 60),
+    "od": (8, 400), "bore": (2, 300), "bcd": (10, 380),
+    "bolt_count": (2, 16), "bolt_d": (2, 20),
+    "set_screw_d": (2, 12),
+    # shaft collar axial width — turning can hold thin rings fine
+    "width": (2, 400),
     "w": None, "d": None, "h": None,  # unused keys allowed
     # enclosure dims handled via width/depth/height keys; alias below
 }
@@ -90,6 +108,22 @@ def normalize(family, params):
             notes.append("Hole diameter capped at 40% of base width — keep ≥1.5×D edge distance; widen the bracket if you need bigger bores.")
         elif clean["hole_d"] > 2.5 * clean["base_th"]:
             notes.append("Large bore relative to plate thickness — fine for clearance holes; consider a boss if threaded.")
+    if family == "flange":
+        rim = (clean["od"] - clean["bcd"]) / 2
+        if clean["bolt_d"] > 0.7 * rim:
+            clean["bolt_d"] = round(0.7 * rim, 2)
+            notes.append("Bolt holes capped — keep ≥1.5×D material between bolt circle and OD.")
+        if clean["bcd"] - clean["bolt_d"] / 2 <= clean["bore"] + clean["bolt_d"] / 2:
+            notes.append("Bolt circle too close to bore — spokes between bore and bolts are thin; review.")
+        if clean["bcd"] >= clean["od"] - 2 * clean["bolt_d"]:
+            clean["bcd"] = round(clean["od"] - 3 * clean["bolt_d"], 2)
+            notes.append(f"Bolt circle pulled in to {clean['bcd']}mm to keep rim material.")
+    if family in ("spacer",):
+        if clean["od"] - clean["bore"] < 4:
+            notes.append("Wall under 2mm after bore — thin for turning; review.")
+    if family == "shaft_collar":
+        if clean["bore"] + 2 * clean["set_screw_d"] >= clean["od"] - 2:
+            notes.append("Set screw too large for wall — clamp load may split the collar; reduce set_screw_d.")
     clean["family"] = family
     if "material" not in clean:
         clean["material"] = "6061-T6"
@@ -136,6 +170,23 @@ def _boxes(p):
         boxes = [(0, 0, 0, w, d, h)]
         holes = [(w / 2, 0, h / 2, "y", p["port_w"], "port")]  # front port cutout (w,h)
         return boxes, holes
+    if fam == "flange":
+        import math as _m
+        R = p["od"] / 2
+        boxes = [(R, R, 0, p["od"], p["od"], p["thickness"])]  # bbox proxy for fit
+        holes = []
+        rb = p["bcd"] / 2
+        n = max(2, int(round(p["bolt_count"])))
+        for i in range(n):
+            a = 2 * _m.pi * i / n
+            holes.append((R + rb * _m.cos(a), R + rb * _m.sin(a), 0, "z", p["bolt_d"]))
+        return boxes, holes
+    if fam == "spacer":
+        boxes = [(p["od"] / 2, p["od"] / 2, 0, p["od"], p["od"], p["thickness"])]
+        return boxes, []
+    if fam == "shaft_collar":
+        boxes = [(p["od"] / 2, p["od"] / 2, 0, p["od"], p["od"], p["width"])]
+        return boxes, []
     return [], []
 
 

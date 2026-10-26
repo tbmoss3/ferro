@@ -160,6 +160,52 @@ for j in range(R_{0}):
     for i in range(C_{0}):
         result -= Pos(gx + i*P, gy + j*P, 0) * Cylinder(D/2, T*3)
 '''.replace("R_{0}", "Rr").replace("C_{0}", "Cc"),
+    "extrusion_bracket": r'''
+from build123d import *
+PW={profile_w}; AL={arm_len}; AT={arm_th}; D={hole_d}
+# L-joiner sized for a PW-wide T-slot profile
+arm1 = Box(AL, PW, AT)                                   # horizontal arm
+arm2 = Pos(AL/2 - AT/2, 0, AT/2) * Box(AT, PW, AL)        # vertical arm at the right end
+result = arm1 + arm2
+# M5 clearance holes: through arm1 along Z, through arm2 along X
+result -= Pos(AL/2 - PW/2, 0, 0) * Cylinder(D/2, AT*3)
+result -= Pos(AL/2 - AT/2, 0, AL/2 + AT/2 - PW/2) * Rot(0, 90, 0) * Cylinder(D/2, AT*3)
+''',
+    "pulley": r'''
+from build123d import *
+import math
+OD={od}; B={bore}; BW={belt_w}; GD={groove_depth}; W={width}; FD={flange_d}; SS={setscrew_d}
+gd = min(GD, (OD/2 - B/2) - 1)
+# all parts centered on z=0 (build123d cylinders are centered)
+# disc body: axis along Z, half-height W/2
+result = Cylinder(OD/2, W)
+# flanges (rims) overlapping the disc faces so they union into one solid
+result += Pos(0, 0, -W/2 + 2) * Cylinder(FD/2, 4)
+result += Pos(0, 0,  W/2 - 2) * Cylinder(FD/2, 4)
+# central bore through the axis
+result -= Cylinder(B/2, W*3)
+# belt groove: annular band at mid-width (z centered at 0)
+ring = Cylinder(OD/2 + 1, BW) - Cylinder(OD/2 - gd, BW + 2)
+result -= ring
+# radial set-screw hole crossing the bore wall
+result -= Pos(0, OD/2, 0) * Rot(90, 0, 0) * Cylinder(SS/2, OD)
+''',
+    "leveling_foot": r'''
+from build123d import *
+PD={pad_od}; PT={pad_th}; SD={stem_d}; SL={stem_len}
+pad = Cylinder(PD/2, PT)                       # z ∈ [-PT/2, PT/2]
+stem = Pos(0, 0, PT/2 + SL/2) * Cylinder(SD/2, SL)   # sits on top of the pad
+result = pad + stem
+''',
+    "port_block": r'''
+from build123d import *
+L={length}; W={width}; T={thickness}; PD_{0}={port_d}; N={port_count}; PD_{1}={port_depth}
+result = Box(L, W, T)
+n = max(1, N)
+x0 = -L/2 + L/n/2
+for i in range(n):
+    result -= Pos(x0 + i*L/n, 0, T/2 - PD_{1}/2) * Cylinder(PD_{0}/2, PD_{1})
+'''.replace("PD_{0}", "Pd").replace("PD_{1}", "Pdp"),
 }
 
 
@@ -206,11 +252,21 @@ def family_script(family, params):
         "od": params.get("od"), "bore": params.get("bore"),
         "bcd": params.get("bcd"), "bolt_count": int(params.get("bolt_count", 4)),
         "bolt_d": params.get("bolt_d"), "set_screw_d": params.get("set_screw_d"),
+        "setscrew_d": params.get("setscrew_d", params.get("set_screw_d")),
         "rows": int(params.get("rows", 8)), "cols": int(params.get("cols", 6)),
         "pitch": params.get("pitch"), "base_th": params.get("base_th"),
         "hole_depth": params.get("hole_depth"), "wall": params.get("wall"),
         "tube_od": params.get("tube_od"), "block_len": params.get("block_len"),
         "block_wid": params.get("block_wid"), "block_th": params.get("block_th"),
+        "profile_w": params.get("profile_w"), "arm_len": params.get("arm_len"),
+        "arm_th": params.get("arm_th"), "slot_w": params.get("slot_w"),
+        "slot_depth": params.get("slot_depth"),
+        "belt_w": params.get("belt_w"), "groove_depth": params.get("groove_depth"),
+        "flange_d": params.get("flange_d"),
+        "pad_od": params.get("pad_od"), "pad_th": params.get("pad_th"),
+        "stem_d": params.get("stem_d"), "stem_len": params.get("stem_len"),
+        "port_d": params.get("port_d"), "port_count": int(params.get("port_count", 3)),
+        "port_depth": params.get("port_depth"),
     }
     return src.format(**{k: v for k, v in keys.items() if v is not None})
 

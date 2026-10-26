@@ -46,6 +46,25 @@ SCHEMAS = {
         length=300.0, width=200.0, thickness=10.0,
         rows=8, cols=12, hole_d=6.6, pitch=25.0,
     ),
+    # T-slot extrusion bracket (2020/2040/4040 machine building)
+    "extrusion_bracket": dict(
+        profile_w=20.0, arm_len=40.0, arm_th=8.0,
+        slot_w=6.0, slot_depth=4.0, hole_d=5.2, hole_count=2,
+    ),
+    # belt pulley (V-belt idler)
+    "pulley": dict(
+        od=60.0, bore=8.0, belt_w=10.0, groove_depth=6.0,
+        width=16.0, flange_d=66.0, setscrew_d=5.0,
+    ),
+    # machine leveling foot
+    "leveling_foot": dict(
+        pad_od=50.0, pad_th=12.0, stem_d=12.0, stem_len=25.0,
+    ),
+    # pneumatic/hydraulic port block / simple manifold
+    "port_block": dict(
+        length=60.0, width=40.0, thickness=25.0,
+        port_d=10.5, port_count=3, port_depth=12.0,
+    ),
 }
 
 PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
@@ -65,6 +84,12 @@ PARAM_LIMITS = {  # (min, max) per key, mm — DFM guardrails
     "base_th": (5, 150), "hole_depth": (3, 140), "wall": (3, 40),
     "tube_od": (2, 100), "block_len": (15, 200), "block_wid": (10, 150),
     "block_th": (5, 80), "pitch": (8, 200),
+    "profile_w": (10, 60), "arm_len": (20, 200), "arm_th": (4, 20),
+    "slot_w": (4, 15), "slot_depth": (2, 10),
+    "belt_w": (4, 40), "groove_depth": (2, 15), "width": (2, 400),
+    "flange_d": (10, 400), "setscrew_d": (2, 12),
+    "pad_od": (15, 200), "pad_th": (5, 60), "stem_d": (4, 40), "stem_len": (5, 150),
+    "port_d": (2, 40), "port_count": (1, 12), "port_depth": (3, 120),
     "w": None, "d": None, "h": None,  # unused keys allowed
     # enclosure dims handled via width/depth/height keys; alias below
 }
@@ -175,6 +200,47 @@ def normalize(family, params):
         if clean["rows"] * clean["pitch"] > clean["width"] + 10:
             clean["width"] = round(clean["rows"] * clean["pitch"], 2)
             notes.append("Plate width grown to fit the grid.")
+    if family == "extrusion_bracket":
+        pw = clean["profile_w"]
+        if clean["arm_th"] > pw * 0.6:
+            clean["arm_th"] = round(pw * 0.6, 2)
+            notes.append(f"Arm thickness capped at 60% of {pw}mm profile — keep the slot clear.")
+        if clean["hole_d"] > pw * 0.35:
+            clean["hole_d"] = round(pw * 0.35, 2)
+            notes.append(f"Bolt holes capped for {pw}mm profile — M5 typical on 20mm series.")
+        if clean["slot_depth"] > pw / 2:
+            clean["slot_depth"] = round(pw / 2, 2)
+            notes.append("Slot depth capped at half the profile — otherwise the arm is split.")
+    if family == "pulley":
+        if clean["flange_d"] < clean["od"]:
+            clean["flange_d"] = clean["od"]
+        if clean["flange_d"] > clean["od"] + 2 * clean["groove_depth"] + 4:
+            clean["flange_d"] = round(clean["od"] + 2 * clean["groove_depth"] + 4, 2)
+            notes.append("Flange OD clipped — flanges just need groove depth + belt clearance.")
+        if clean["belt_w"] > clean["width"] - 4:
+            clean["belt_w"] = round(clean["width"] - 4, 2)
+            notes.append("Belt width must clear the pulley face by ≥2mm per side.")
+        if clean["bore"] + 2 * clean["setscrew_d"] > clean["od"] - 4:
+            clean["setscrew_d"] = round(max(2.0, (clean["od"] - 4 - clean["bore"]) / 2), 2)
+            notes.append("Set screw reduced — hub wall too thin.")
+    if family == "leveling_foot":
+        if clean["stem_d"] > clean["pad_od"] * 0.8:
+            clean["stem_d"] = round(clean["pad_od"] * 0.8, 2)
+            notes.append("Stem too fat for the pad — keep pad overhang for weld/fillet area.")
+    if family == "port_block":
+        L, W, T = clean["length"], clean["width"], clean["thickness"]
+        if clean["port_depth"] > T - 3:
+            clean["port_depth"] = round(T - 3, 2)
+            notes.append("Port depth clipped to leave ≥3mm wall between port floor and opposite face.")
+        if clean["port_count"] * (clean["port_d"] + 4) > L:
+            need = round(clean["port_count"] * (clean["port_d"] + 4), 2)
+            clean["length"] = need
+            notes.append(f"Block length grown to {need}mm — ports need ≥{clean['port_d']+4}mm pitch along the face.")
+        if clean["port_d"] > W - 4:
+            clean["port_d"] = round(W - 4, 2)
+            notes.append("Port diameter capped — keep ≥2mm material each side of the port face.")
+    if "port_count" in clean:
+        clean["port_count"] = int(clean["port_count"])
     clean["family"] = family
     if "material" not in clean:
         clean["material"] = "6061-T6"
@@ -271,6 +337,38 @@ def _boxes(p):
             for i in range(p["cols"]):
                 holes.append((gx + i * p["pitch"], gy + j * p["pitch"],
                               0, "z", p["hole_d"]))
+        return boxes, holes
+    if fam == "extrusion_bracket":
+        A1, A2, TH = p["arm_len"], p["arm_len"], p["arm_th"]
+        boxes = [(0, 0, 0, A1, TH, TH),
+                 (A1 - TH, 0, TH, TH, A2, TH)]
+        holes = []
+        n2 = max(1, int(p["hole_count"]) // 2)
+        for i in range(n2):
+            holes.append((A1 * (i + 0.5) / n2, TH / 2, 0, "z", p["hole_d"]))
+            holes.append((A1 - TH / 2, TH + A2 * (i + 0.5) / n2, TH, "x", p["hole_d"]))
+        return boxes, holes
+    if fam == "pulley":
+        OD, W = p["od"], p["width"]
+        boxes = [(OD / 2, 0, 0, OD, W, OD)]  # cylinder proxy box
+        holes = [(OD / 2, W / 2, 0, "y", p["bore"], "bore"),
+                 (OD / 2, 0, OD / 2, "y", p["belt_w"], "groove"),
+                 (0, W / 2, OD / 2, "x", p["setscrew_d"])]
+        return boxes, holes
+    if fam == "leveling_foot":
+        PD, PT, SD, SL = p["pad_od"], p["pad_th"], p["stem_d"], p["stem_len"]
+        boxes = [(PD / 2, 0, 0, PD, PT, PD),
+                 ((0, 0, 0, SD, PT + SL, SD))]
+        holes = [(PD / 2 + SL / 2, PT / 2, PD / 2, "x", 3.0, "swivel")]
+        return boxes, holes
+    if fam == "port_block":
+        L, W, T = p["length"], p["width"], p["thickness"]
+        boxes = [(0, 0, 0, L, W, T)]
+        holes = []
+        n = max(1, int(p["port_count"]))
+        x0 = L / n / 2
+        for i in range(n):
+            holes.append((x0 + i * L / n, W / 2, T, "z", p["port_d"], "blind-port"))
         return boxes, holes
     return [], []
 

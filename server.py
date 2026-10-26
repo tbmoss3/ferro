@@ -29,10 +29,18 @@ MODE 1 — PARAMETRIC (preferred when it fits). Parametric engine families (mm):
 - tube_rack: rows, cols, hole_d, pitch, base_th, hole_depth, wall (lab/pharma racks)
 - tube_clamp: tube_od, block_len, block_wid, block_th, hole_d, hole_count (saddle clamps)
 - grid_plate: length, width, thickness, rows, cols, hole_d, pitch (breadboards/optics)
+- extrusion_bracket: profile_w, arm_len, arm_th, hole_d (2020/2040/4040 T-slot joiners)
+- pulley: od, bore, belt_w, groove_depth, width, flange_d, setscrew_d (belt idlers)
+- leveling_foot: pad_od, pad_th, stem_d, stem_len (machine feet)
+- port_block: length, width, thickness, port_d, port_count, port_depth (pneumatic/manifold blocks)
 Stock materials: 6061-T6, 7075-T6, steel-1018, 304-SS, 316L, PEEK, delrin.
+Vocabulary note: customers may say "bucky stand mount", "IV-pole base plate", "engine mount",
+"NEMA motor mount", "T-slot joiner", "machine foot" — map these to the closest family above.
+Multi-part assemblies (hospital beds, engines, robots, tables) are NOT one machined part —
+route them to generative mode only for single custom components, else say what we can make.
 If the request fits (or nearly fits) a family, END your message with:
 ```design
-{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar|tube_rack|tube_clamp|grid_plate>", "params": {...}, "material": "6061-T6"}
+{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar|tube_rack|tube_clamp|grid_plate|extrusion_bracket|pulley|leveling_foot|port_block>", "params": {...}, "material": "6061-T6"}
 ```
 Include absolute values for the keys you're setting. On edits, re-emit the FULL set.
 MANDATORY SELF-CHECK before replying: re-read the customer's message and verify every

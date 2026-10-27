@@ -17,6 +17,7 @@ function addMsg(role, text) {
   el.innerHTML = fmt(text);
   $("chat").appendChild(el);
   $("chat").scrollTop = 1e9;
+  return el;
 }
 
 function setBusy(b) {

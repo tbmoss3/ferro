@@ -125,7 +125,11 @@
   button:hover:not(:disabled) { background:var(--acc-hi); }
   button:disabled { opacity:.55; cursor:default; }
 
-  #preview { text-align:center; min-height:120px; }
+  #preview3d, #preview { text-align:center; min-height:120px; }
+  #preview3d model-viewer { width:100%; height:300px; background:#111319;
+      border-radius:10px; --poster-color:#111319; }
+  #preview3d .mvhint { color:var(--faint); font-size:11px; margin-top:6px;
+      letter-spacing:.5px; }
   #preview svg { max-width:100%; border-radius:8px; }
   #preview img { max-width:100%; border-radius:8px; }
   #preview .empty { color:var(--faint); font-size:13px; padding:34px 10px; line-height:1.7; }
@@ -297,11 +301,11 @@
     </div>
   </div>
   <div class="col right">
-    <div class="box"><h3>Live design preview</h3><div id="preview">
-      <div class="empty"><b>Nothing yet.</b><br>
-        Start the conversation — a parametric preview renders here
-        as we talk. Generative drafts are verified by the CAD kernel
-        and route to engineer review.</div></div></div>
+    <div class="box"><h3>Live design preview <em>· drag to spin</em></h3>
+      <div id="preview3d"><div class="empty"><b>Nothing yet.</b><br>
+        Start the conversation — a live 3D model you can orbit, plus a dimensioned drawing, render here.</div></div>
+      <div id="preview" style="display:none"></div>
+    </div>
     <div class="box" id="dfmbox"><h3>DFM notes</h3><ul id="dfm"></ul></div>
     <div class="box" id="packet"><h3>Design packet <em>· approval → CAD → CAM</em></h3>
       <div id="packetbody"></div>
@@ -328,6 +332,7 @@
   <div>intake &amp; design agent live · CAD kernel verification live · CAD→CAM gated (roadmap)</div>
   <div style="margin-left:auto">compounds with every engagement</div>
 </footer>
+<script type="module" src="/static/vendor/model-viewer.min.js"></script>
 <script src="/static/app.js"></script>
 <script>
 function scrollToApp(){

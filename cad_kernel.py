@@ -38,6 +38,15 @@ try:
     area = s.area           # mm^2
     export_step(s, sys.argv[2])
     export_stl(s, sys.argv[3])
+    # GLB for the interactive web viewer (build123d glTF export)
+    glb_ok = False
+    try:
+        from build123d import export_gltf
+        export_gltf(s, sys.argv[4])
+        glb_ok = True
+    except Exception:
+        pass
+    result["glb"] = glb_ok
     # BRep validity check
     valid = True
     try:
@@ -214,6 +223,7 @@ def run_kernel(script_src, name, timeout=90):
     d = ARTIFACTS / name
     d.mkdir(parents=True, exist_ok=True)
     step, stl = d / "part.step", d / "part.stl"
+    glb = d / "part.glb"
     with tempfile.TemporaryDirectory() as td:
         harness = Path(td) / "harness.py"
         design = Path(td) / "design.py"
@@ -221,7 +231,7 @@ def run_kernel(script_src, name, timeout=90):
         design.write_text(script_src)
         try:
             r = subprocess.run(
-                [PY, harness, design, step, stl],
+                [PY, harness, design, step, stl, glb],
                 capture_output=True, text=True, timeout=timeout)
             out = r.stdout
             if "__FERRO_RESULT__" in out:
@@ -333,6 +343,99 @@ ax.set_axis_off(); fig.tight_layout(pad=0)
 fig.savefig(png, facecolor="#f4f4f0")
 print("RENDER_OK", round(float(tm.volume), 2))
 '''
+
+# 2D dimensioned drawing (SVG 3-view + DXF) — the "sketch file"
+DRAWING_HARNESS = r'''
+import sys, math
+import numpy as np, trimesh, matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
+stl, svg, dxf, png = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+tm = trimesh.load(stl, force="mesh")
+size = tm.bounds[1] - tm.bounds[0]
+views = {
+  "FRONT (XZ)": (0, 2),
+  "TOP (XY)":   (0, 1),
+  "RIGHT (YZ)": (1, 2),
+}
+fig, axes = plt.subplots(1, 3, figsize=(15, 5.4), dpi=96)
+fig.patch.set_facecolor("#f4f4f0")
+polys_by_view = {}
+for ax, (title, (ax1, ax2)) in zip(axes, views.items()):
+    V = tm.vertices
+    P = V[:, [ax1, ax2]]
+    tris = [Polygon(P[f]) for f in tm.faces]
+    union = unary_union(tris)
+    polys_by_view[title] = union
+    ext = union.exterior
+    xs, ys = np.asarray(ext.coords)[:, 0], np.asarray(ext.coords)[:, 1]
+    ax.fill(xs, ys, facecolor="#c9cedb", edgecolor="#2c313c", linewidth=0.8)
+    if union.interiors:
+        for ring in union.interiors:
+            r = np.asarray(ring.coords)
+            ax.fill(r[:, 0], r[:, 1], facecolor="#f4f4f0", edgecolor="#2c313c", linewidth=0.7)
+    ax.set_title(title, fontsize=10, color="#333")
+    x0, y0 = tm.bounds[0][ax1], tm.bounds[0][ax2]
+    dw, dh = size[ax1], size[ax2]
+    off = 0.08 * max(dw, dh) + 2
+    ax.annotate("", xy=(x0 + dw, y0 - off), xytext=(x0, y0 - off),
+                arrowprops=dict(arrowstyle="<->", color="#e07b39", lw=1))
+    ax.text(x0 + dw/2, y0 - off - 0.06*max(dw,dh) - 2, f"{dw:g} mm",
+            ha="center", fontsize=9, color="#e07b39")
+    ax.annotate("", xy=(x0 - off, y0 + dh), xytext=(x0 - off, y0),
+                arrowprops=dict(arrowstyle="<->", color="#e07b39", lw=1))
+    ax.text(x0 - off - 3, y0 + dh/2, f"{dh:g} mm", va="center", ha="right",
+            fontsize=9, color="#e07b39", rotation=90)
+    ax.set_aspect("equal"); ax.set_axis_off()
+    m = off + 6
+    ax.set_xlim(x0 - m, x0 + dw + m); ax.set_ylim(y0 - m, y0 + dh + m)
+fig.suptitle("FERRO — dimensioned 3-view drawing (mm)", fontsize=12, color="#333")
+fig.tight_layout(rect=[0, 0, 1, 0.94])
+fig.savefig(svg, facecolor="#f4f4f0")
+fig.savefig(png, facecolor="#f4f4f0")
+
+# DXF: real 2D outlines per view, AutoCAD-openable
+import ezdxf
+doc = ezdxf.new("R2010")
+doc.layers.add("OUTLINE", color=7)
+msp = doc.modelspace()
+gap_x = size.max() * 1.4 + 40
+offx = {"FRONT (XZ)": 0, "TOP (XY)": gap_x, "RIGHT (YZ)": 0}
+offy = {"FRONT (XZ)": 0, "TOP (XY)": 0, "RIGHT (YZ)": size[2]*1.4 + 40}
+def put(ring, ox, oy):
+    pts = [(p[0] + ox, p[1] + oy) for p in np.asarray(ring.coords)]
+    if len(pts) > 2:
+        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "OUTLINE"})
+for title in views:
+    u = polys_by_view[title]
+    ox, oy = offx[title], offy[title]
+    put(u.exterior, ox, oy)
+    for ring in u.interiors:
+        put(ring, ox, oy)
+doc.saveas(dxf)
+print("DRAWING_OK")
+'''
+
+def render_drawing(name, timeout=180):
+    """3-view dimensioned SVG + DXF + PNG from the verified STL."""
+    d = ARTIFACTS / name
+    svg, dxf, png = d / "drawing.svg", d / "drawing.dxf", d / "drawing.png"
+    stl = d / "part.stl"
+    if not stl.exists():
+        return None
+    with tempfile.TemporaryDirectory() as td:
+        h = Path(td) / "draw.py"
+        h.write_text(DRAWING_HARNESS)
+        try:
+            r = subprocess.run([PY, h, stl, svg, dxf, png],
+                                capture_output=True, text=True, timeout=timeout)
+            if "DRAWING_OK" in r.stdout:
+                return {"svg": str(svg), "dxf": str(dxf), "png": str(png)}
+            return None
+        except Exception:
+            return None
 
 def render_png(name, timeout=90):
     """Isometric shaded render of the exported STL, headless (in the CAD venv)."""

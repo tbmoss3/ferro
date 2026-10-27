@@ -118,8 +118,10 @@ function buildPacket(j) {
       <div class="pscroll">${rows}${metrics}</div>
       <div class="dlrow">
         ${k.step_url ? `<a class="dlbtn" href="${k.step_url}" download>⇩ STEP</a>` : ""}
+        ${k.glb_url ? `<a class="dlbtn" href="${k.glb_url}" download>⇩ 3D (GLB)</a>` : ""}
+        ${k.drawing_dxf_url ? `<a class="dlbtn" href="${k.drawing_dxf_url}" download>⇩ Drawing (DXF)</a>` : ""}
+        ${k.drawing_svg_url ? `<a class="dlbtn ghost" href="${k.drawing_svg_url}" download>⇩ 2D (SVG)</a>` : ""}
         ${k.stl_url ? `<a class="dlbtn ghost" href="${k.stl_url}" download>⇩ STL</a>` : ""}
-        ${k.preview_url ? `<a class="dlbtn ghost" href="${k.preview_url}" target="_blank">⇩ Preview</a>` : ""}
       </div>
       <button class="approve">Approve for CAD</button>
     </div>
@@ -149,9 +151,18 @@ function buildPacket(j) {
   };
 
   if (k.preview_url) {
-    $("preview").innerHTML = `<img src="${k.preview_url}" alt="kernel-rendered preview" style="max-width:100%;border-radius:8px">`;
+    if (k.glb_url && document.createElement("model-viewer").constructor !== HTMLElement) {
+      $("preview3d").innerHTML = `
+        <model-viewer src="${k.glb_url}" camera-controls touch-action="pan-y"
+          auto-rotate ar-status="not-presenting" shadow-intensity="0.6"
+          exposure="0.9" environment-image="neutral"
+          alt="interactive 3D preview of the part"></model-viewer>
+        <div class="mvhint">drag to orbit · pinch/scroll to zoom · two-finger to pan</div>`;
+    } else {
+      $("preview3d").innerHTML = `<img src="${k.preview_url}" alt="rendered preview" style="max-width:100%;border-radius:8px">`;
+    }
   } else if (j.design && j.svg) {
-    $("preview").innerHTML = j.svg;
+    $("preview3d").innerHTML = j.svg;
   }
 }
 

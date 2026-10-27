@@ -274,10 +274,16 @@ def kernel_verify(session, clean=None, gen_src=None, header=None):
         return m, m.get("error", "kernel failed")
     checks, mass = K.dfm_checks(m, material)
     png, _ = K.render_png(name)
+    drawing = K.render_drawing(name)
     m["mass_kg"] = mass
     m["material"] = material
     m["checks"] = checks
     m["preview_url"] = f"/artifacts/{name}/preview.png" if png else None
+    m["glb_url"] = f"/artifacts/{name}/part.glb" if m.get("glb") else None
+    if drawing:
+        m["drawing_svg_url"] = f"/artifacts/{name}/drawing.svg"
+        m["drawing_dxf_url"] = f"/artifacts/{name}/drawing.dxf"
+        m["drawing_png_url"] = f"/artifacts/{name}/drawing.png"
     return m, checks
 
 import threading
@@ -337,6 +343,10 @@ def _build_reply(session, message):
             "breps_valid": kernel.get("breps_valid"),
             "checks": kernel.get("checks", []),
             "preview_url": kernel.get("preview_url"),
+            "glb_url": kernel.get("glb_url"),
+            "drawing_svg_url": kernel.get("drawing_svg_url"),
+            "drawing_dxf_url": kernel.get("drawing_dxf_url"),
+            "drawing_png_url": kernel.get("drawing_png_url"),
             "step_url": f"/artifacts/{session}/part.step",
             "stl_url": f"/artifacts/{session}/part.stl",
         }
@@ -385,7 +395,10 @@ def artifact(name: str, fn: str):
     if not p.exists():
         return {"error": "not found"}
     media = {"part.step": "application/step", "part.stl": "model/stl",
-             "preview.png": "image/png"}.get(fn, "application/octet-stream")
+             "part.glb": "model/gltf-binary",
+             "preview.png": "image/png", "drawing.png": "image/png",
+             "drawing.svg": "image/svg+xml",
+             "drawing.dxf": "application/dxf"}.get(fn, "application/octet-stream")
     return FileResponse(p, media_type=media, filename=fn)
 
 @app.get("/health")

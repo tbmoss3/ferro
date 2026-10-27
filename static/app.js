@@ -31,32 +31,73 @@ function setBusy(b) {
 
 // ---- message queue: Enter while the agent is working queues your message ----
 const queue = [];
+let attachment = null;   // {name, data_b64}
+
+function setFileChip() {
+  const c = $("filechip");
+  if (attachment) { c.style.display = "block"; c.textContent = "📎 " + attachment.name + " attached — Enter to analyze (click to remove)"; }
+  else c.style.display = "none";
+}
+
+function clearAttachment() { attachment = null; setFileChip(); }
+
+function readAttachment(f) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const b64 = String(r.result).split(",")[1];
+      attachment = { name: f.name, data_b64: b64 };
+      setFileChip();
+      res();
+    };
+    r.onerror = rej;
+    r.readAsDataURL(f);
+  });
+}
+
+$("attachbtn").onclick = () => $("fileinput").click();
+$("fileinput").onchange = async () => {
+  const f = $("fileinput").files[0];
+  if (f) await readAttachment(f);
+  $("fileinput").value = "";
+};
+["dragover", "dragenter"].forEach(ev => document.addEventListener(ev, e => {
+  e.preventDefault(); document.body.classList.add("dragover");
+}));
+["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => {
+  e.preventDefault(); document.body.classList.remove("dragover");
+}));
+document.addEventListener("drop", async e => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) await readAttachment(f);
+});
 
 async function send() {
   const text = $("input").value.trim();
-  if (!text) return;
+  if (!text && !attachment) return;
+  const file = attachment ? { name: attachment.name, data_b64: attachment.data_b64 } : null;
   $("input").value = "";
+  attachment = null; setFileChip();
   $("chat").querySelector(".welcome")?.remove();
   if (busy) {
-    // agent mid-turn: don't drop the message — queue it, show it now
-    queue.push(text);
-    const el = addMsg("user", text);
+    queue.push({ text: text || "(see attached file)", file });
+    const el = addMsg("user", (text || "📎 " + (file ? file.name : "")) + (file ? " 📎" : ""));
     el.classList.add("queued");
     el.title = "queued — sends when the agent finishes";
     $("status").innerHTML = `<span class="qtag">queued ${queue.length} — sends when the current design finishes</span>`;
     return;
   }
-  await doSend(text);
+  await doSend(text || "Here is a file of the part I need made.", file);
 }
 
-async function doSend(text) {
-  addMsg("user", text);
+async function doSend(text, file) {
+  addMsg("user", text + (file ? " 📎" + file.name : ""));
   setBusy(true);
   try {
     const r = await fetch("/chat", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({session: sessionId, message: text}),
+      body: JSON.stringify({session: sessionId, message: text, file}),
     });
     const q = await r.json();
     let j = q;
@@ -89,8 +130,8 @@ async function doSend(text) {
   // drain the queue: any messages typed mid-turn fire now, in order
   if (queue.length) {
     const next = queue.shift();
-    addMsg("agent", `(queued) running: “${next.slice(0, 60)}${next.length > 60 ? "…" : ""}”`);
-    await doSend(next);
+    addMsg("agent", `(queued) running: “${(next.text || "").slice(0, 60)}${(next.text||"").length > 60 ? "…" : ""}”` + (next.file ? " 📎" : ""));
+    await doSend(next.text || "Here is a file of the part I need made.", next.file);
   } else {
     $("input").focus();
   }

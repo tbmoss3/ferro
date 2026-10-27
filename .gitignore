@@ -6,3 +6,4 @@ sessions/
 .venv-cad/
 artifacts/
 nohup.out
+uploads/

@@ -93,13 +93,15 @@ def load_state(session):
 def save_state(session, st):
     (STATE_DIR / f"{session}.json").write_text(json.dumps(st, indent=1))
 
-def build_prompt(st, message):
+def build_prompt(st, message, file_ctx=None):
     hist = st["history"][-14:]
     lines = [AGENT_SYS, "", "== CONVERSATION SO FAR =="]
     for h in hist:
         lines.append(f"{'CUSTOMER' if h['role']=='user' else 'FERRO AGENT'}: {h['text'][:700]}")
     if st.get("design"):
         lines.append(f"== CURRENT DESIGN STATE == {json.dumps(st['design'])}")
+    if file_ctx:
+        lines.append(f"== FILE INTAKE (NEW INPUT — use it) ==\n{file_ctx}")
     lines.append(f"== NEW CUSTOMER MESSAGE ==\n{message}\n== YOUR REPLY ==")
     return "\n".join(lines)
 
@@ -202,21 +204,20 @@ def fallback_reply(message):
     return (f"Let's start with a parametric {fam} in 6061-T6 — preview and packet below. "
             "(Offline-mode defaults; agent unavailable.)"), design, []
 
-def process(message, st):
-    prompt = build_prompt(st, message)
-    st["history"].append({"role": "user", "text": message})
-    out, ok = ask_hermes(prompt)
+def _parse_agent_reply(st, out, ok):
+    """Parse a brain reply into (reply, design, notes, gen) + update history/design state."""
     gen = None
+    design = None
     if not ok:
-        reply, design, extra = fallback_reply(message)
+        reply = out  # fallback text path handled by caller
+        notes = []
     else:
         reply, design = out, None
-        # generative mode first: ```cad (build123d) preferred, ```scad legacy
         cad_src, cad_header = parse_cad_block(out)
         if cad_src:
             gen = {"cad": cad_src, "header": cad_header, "notes": []}
             reply = CAD_RE.sub("", out).strip()
-            st["design"] = None  # generative replaces parametric state
+            st["design"] = None
         else:
             src, header, scad_notes = parse_scad_block(out)
             if src:
@@ -245,6 +246,17 @@ def process(message, st):
     else:
         clean, notes = st.get("design"), []
     return reply, clean, notes, gen
+
+def process(message, st):
+    prompt = build_prompt(st, message)
+    st["history"].append({"role": "user", "text": message})
+    out, ok = ask_hermes(prompt)
+    if not ok:
+        reply, design, extra = fallback_reply(message)
+        st["history"].append({"role": "agent", "text": reply})
+        clean = st.get("design")
+        return reply, clean, [], None
+    return _parse_agent_reply(st, out, True)
 
 app = FastAPI()
 
@@ -293,9 +305,65 @@ import threading
 RESULTS = {}   # session -> {"status": "working"/"done"/"error", "result": resp}
 LOCKS = {}
 
-def _build_reply(session, message):
+def _build_reply(session, message, file=None):
     st = load_state(session)
-    reply, design, notes, gen = process(message, st)
+
+    # ---- file ingestion: build a context block for the brain ----
+    file_ctx = None
+    file_kernel = None
+    stored = None
+    if file:
+        try:
+            import file_ingest as FI
+            data = file.get("data", b"")
+            if isinstance(data, str):
+                data = data.encode("latin-1", "replace")
+            okf, stored = FI.save_upload(session, file.get("name", "upload.bin"), data)
+            if okf:
+                file_ctx, file_kernel = FI.analyze_upload(session, stored, message)
+            else:
+                file_ctx = f"== ATTACHED FILE REJECTED ==\n{stored}\nTell the customer politely."
+        except Exception as e:
+            file_ctx = f"== ATTACHED FILE ERROR ==\n{e}\nTell the customer to re-send or describe in words."
+
+    if file_ctx:
+        st["history"].append({"role": "user",
+                               "text": (message or "") + (f" [attached: {file.get('name')}]" if file else "")})
+        out, ok = ask_hermes(build_prompt(st, message, file_ctx))
+        if ok:
+            reply, design, notes, gen = _parse_agent_reply(st, out, True)
+        else:
+            reply, design, notes, gen = fallback_reply(message)
+            st["history"].append({"role": "agent", "text": reply})
+            design = None
+    else:
+        reply, design, notes, gen = process(message, st)
+
+    # deterministic STEP-import metrics become the kernel result
+    if file_kernel and file_kernel.get("ok"):
+        import cad_kernel as K, time as _t, shutil
+        png, _ = K.render_png(session)
+        drawing = K.render_drawing(session)
+        fk = dict(file_kernel)
+        fk["mass_kg"] = round(fk["volume_mm3"] * K.DENSITIES.get("6061-T6", 2700) * 1e-9, 3)
+        fk["material"] = "6061-T6 (assumed — confirm)"
+        fk["checks"] = []
+        fk["rev"] = int(_t.time())
+        fk["preview_url"] = f"/artifacts/{session}/preview.png" if png else None
+        fk["glb"] = False
+        if drawing:
+            fk["drawing_svg_url"] = f"/artifacts/{session}/drawing.svg"
+            fk["drawing_dxf_url"] = f"/artifacts/{session}/drawing.dxf"
+            fk["drawing_png_url"] = f"/artifacts/{session}/drawing.png"
+        fk["step_url"] = f"/artifacts/{session}/part.step"
+        fk["stl_url"] = f"/artifacts/{session}/part.stl"
+        try:
+            up = K.ARTIFACTS.parent / "uploads" / session / file.get("name", "")
+            if up.exists():
+                shutil.copy(up, K.ARTIFACTS / session / "part.step")
+        except Exception:
+            pass
+        file_kernel = fk
 
     # generative: kernel verification with one auto-repair retry
     kernel = None
@@ -353,6 +421,28 @@ def _build_reply(session, message):
             "step_url": f"/artifacts/{session}/part.step",
             "stl_url": f"/artifacts/{session}/part.stl",
         }
+    if file_kernel:
+        fk = file_kernel
+        resp["kernel"] = {
+            "ok": True,
+            "volume_mm3": fk.get("volume_mm3"),
+            "area_mm2": fk.get("area_mm2"),
+            "size_mm": fk.get("size_mm"),
+            "mass_kg": fk.get("mass_kg"),
+            "material": fk.get("material"),
+            "solids_n": fk.get("solids_n"),
+            "breps_valid": fk.get("breps_valid"),
+            "checks": [],
+            "rev": fk.get("rev"),
+            "preview_url": fk.get("preview_url"),
+            "glb_url": None,
+            "drawing_svg_url": fk.get("drawing_svg_url"),
+            "drawing_dxf_url": fk.get("drawing_dxf_url"),
+            "drawing_png_url": fk.get("drawing_png_url"),
+            "step_url": fk.get("step_url"),
+            "stl_url": fk.get("stl_url"),
+            "source": "imported STEP (deterministic)",
+        }
     if design:
         resp.update(design={
             "family": design["family"], "params": design},
@@ -361,10 +451,10 @@ def _build_reply(session, message):
             mass_kg=design.get("mass_kg", T.mass_kg(design)))
     return resp
 
-def _worker(session, message):
+def _worker(session, message, file=None):
     try:
         RESULTS[session] = {"status": "working"}
-        RESULTS[session] = {"status": "done", "result": _build_reply(session, message)}
+        RESULTS[session] = {"status": "done", "result": _build_reply(session, message, file)}
     except Exception as e:
         RESULTS[session] = {"status": "error", "result": {"reply": f"[error] {e}"}}
 
@@ -373,12 +463,16 @@ async def chat(req: Request):
     body = await req.json()
     session = body.get("session", "default")
     message = body.get("message", "")
+    file = body.get("file")  # {"name": ..., "data_b64": ...}
+    if file and file.get("data_b64"):
+        import base64 as _b64
+        file["data"] = _b64.b64decode(file["data_b64"])
     lock = LOCKS.setdefault(session, threading.Lock())
     with lock:
         cur = RESULTS.get(session, {})
         if cur.get("status") == "working":
             return {"accepted": True, "status": "working", "session": session}
-        threading.Thread(target=_worker, args=(session, message), daemon=True).start()
+        threading.Thread(target=_worker, args=(session, message, file), daemon=True).start()
     return {"accepted": True, "status": "queued", "session": session}
 
 @app.get("/result/{session}")

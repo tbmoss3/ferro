@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglu1-mesa libglib2.0-0 libxrender1 libxext6 libsm6 libice6 \
     && rm -rf /var/lib/apt/lists/*
 # FastAPI app + CAD kernel deps (build123d pulls the OpenCASCADE/OCCT wheel, ~150MB)
-RUN pip install --no-cache-dir fastapi uvicorn build123d trimesh matplotlib numpy ezdxf shapely
+RUN pip install --no-cache-dir fastapi uvicorn build123d trimesh matplotlib numpy ezdxf shapely pymupdf
 # Brain: OPENROUTER_API_KEY env var (direct API call) — set in Railway dashboard.
 # Optional: FERRO_BRAIN_MODEL (default z-ai/glm-5.3)
 ENV PORT=8811 FERRO_CAD_PY=/usr/local/bin/python

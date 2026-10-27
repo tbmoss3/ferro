@@ -115,7 +115,17 @@
   .dots i:nth-child(2) { animation-delay:.2s; } .dots i:nth-child(3) { animation-delay:.4s; }
   @keyframes pulse { 0%,100%{opacity:.25} 50%{opacity:1} }
 
-  #inputbar { display:flex; gap:8px; padding-top:8px; flex:0 0 auto; }
+  #inputbar { display:flex; gap:8px; padding-top:8px; flex:0 0 auto; align-items:stretch; }
+  #attachbtn { background:var(--panel2); border:1px solid var(--line); color:var(--dim);
+      border-radius:10px; padding:0 14px; cursor:pointer; font-size:15px; }
+  #attachbtn:hover { color:var(--txt); border-color:var(--acc); }
+  #filechip { display:none; margin-top:8px; padding:7px 12px; background:var(--panel2);
+      border:1px dashed var(--acc); border-radius:99px; color:var(--acc); font-size:12px;
+      cursor:pointer; width:fit-content; }
+  body.dragover::after { content:"drop file to attach"; position:fixed; inset:8px;
+      border:2px dashed var(--acc); border-radius:14px; color:var(--acc);
+      display:flex; align-items:center; justify-content:center; font-size:16px;
+      background:rgba(232,133,61,.07); z-index:99; pointer-events:none; }
   #input { flex:1; background:#111319; color:var(--txt);
            border:1px solid var(--line); border-radius:10px;
            padding:13px 15px; font-size:15px; outline:none; }
@@ -297,9 +307,13 @@
       </div>
       <div id="status" aria-live="polite"></div>
       <div id="inputbar">
+        <button id="attachbtn" type="button" title="attach a photo, sketch, PDF drawing, STEP or DXF">📎</button>
+        <input id="fileinput" type="file" style="display:none"
+               accept=".png,.jpg,.jpeg,.webp,.pdf,.step,.stp,.dxf">
         <input id="input" placeholder="Describe the part you need…" aria-label="Describe the part you need">
         <button id="sendbtn" onclick="send()">Send</button>
       </div>
+      <div id="filechip" onclick="clearAttachment()" title="click to remove"></div>
     </div>
   </div>
   <div class="col right">

@@ -251,6 +251,7 @@ app = FastAPI()
 def kernel_verify(session, clean=None, gen_src=None, header=None):
     """Run the build123d kernel. Returns (metrics, checks, mass, preview_ok) or
     (None, reason) if the CAD python is unavailable on this host."""
+    import time as _time
     try:
         import cad_kernel as K
     except Exception:
@@ -278,6 +279,7 @@ def kernel_verify(session, clean=None, gen_src=None, header=None):
     m["mass_kg"] = mass
     m["material"] = material
     m["checks"] = checks
+    m["rev"] = int(_time.time())          # cache-bust: force clients to refetch artifacts
     m["preview_url"] = f"/artifacts/{name}/preview.png" if png else None
     m["glb_url"] = f"/artifacts/{name}/part.glb" if m.get("glb") else None
     if drawing:
@@ -342,6 +344,7 @@ def _build_reply(session, message):
             "solids_n": kernel.get("solids_n"),
             "breps_valid": kernel.get("breps_valid"),
             "checks": kernel.get("checks", []),
+            "rev": kernel.get("rev"),
             "preview_url": kernel.get("preview_url"),
             "glb_url": kernel.get("glb_url"),
             "drawing_svg_url": kernel.get("drawing_svg_url"),

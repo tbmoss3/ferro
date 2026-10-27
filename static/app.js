@@ -104,8 +104,11 @@ function paramRow(k, v) {
   return `<div class="prow"><span class="pk">${esc(label)}</span><span class="pv">${esc(String(v))}${unit}</span></div>`;
 }
 
+function bust(url, rev) { return url ? url + "?v=" + (rev || Date.now()) : url; }
+
 function buildPacket(j) {
   const k = j.kernel || {};
+  const REV = k.rev;
   const d = j.design || {};
   const mode = j.generative ? "Generative" : "Parametric";
   const mat = (d.params && d.params.material) || d.material || k.material || "6061-T6";
@@ -140,11 +143,11 @@ function buildPacket(j) {
       <div class="pmeta"><span class="pbadge">${mode}</span><span class="pbadge ghost">${esc(d.family||"part")}</span><span class="pmaterial">${esc(mat)}</span></div>
       <div class="pscroll">${rows}${metrics}</div>
       <div class="dlrow">
-        ${k.step_url ? `<a class="dlbtn" href="${k.step_url}" download>⇩ STEP</a>` : ""}
-        ${k.glb_url ? `<a class="dlbtn" href="${k.glb_url}" download>⇩ 3D (GLB)</a>` : ""}
-        ${k.drawing_dxf_url ? `<a class="dlbtn" href="${k.drawing_dxf_url}" download>⇩ Drawing (DXF)</a>` : ""}
-        ${k.drawing_svg_url ? `<a class="dlbtn ghost" href="${k.drawing_svg_url}" download>⇩ 2D (SVG)</a>` : ""}
-        ${k.stl_url ? `<a class="dlbtn ghost" href="${k.stl_url}" download>⇩ STL</a>` : ""}
+        ${k.step_url ? `<a class="dlbtn" href="${bust(k.step_url, REV)}" download>⇩ STEP</a>` : ""}
+        ${k.glb_url ? `<a class="dlbtn" href="${bust(k.glb_url, REV)}" download>⇩ 3D (GLB)</a>` : ""}
+        ${k.drawing_dxf_url ? `<a class="dlbtn" href="${bust(k.drawing_dxf_url, REV)}" download>⇩ Drawing (DXF)</a>` : ""}
+        ${k.drawing_svg_url ? `<a class="dlbtn ghost" href="${bust(k.drawing_svg_url, REV)}" download>⇩ 2D (SVG)</a>` : ""}
+        ${k.stl_url ? `<a class="dlbtn ghost" href="${bust(k.stl_url, REV)}" download>⇩ STL</a>` : ""}
       </div>
       <button class="approve">Approve for CAD</button>
     </div>
@@ -176,13 +179,13 @@ function buildPacket(j) {
   if (k.preview_url) {
     if (k.glb_url && document.createElement("model-viewer").constructor !== HTMLElement) {
       $("preview3d").innerHTML = `
-        <model-viewer src="${k.glb_url}" camera-controls touch-action="pan-y"
+        <model-viewer src="${bust(k.glb_url, REV)}" camera-controls touch-action="pan-y"
           auto-rotate ar-status="not-presenting" shadow-intensity="0.6"
           exposure="0.9" environment-image="neutral"
           alt="interactive 3D preview of the part"></model-viewer>
         <div class="mvhint">drag to orbit · pinch/scroll to zoom · two-finger to pan</div>`;
     } else {
-      $("preview3d").innerHTML = `<img src="${k.preview_url}" alt="rendered preview" style="max-width:100%;border-radius:8px">`;
+      $("preview3d").innerHTML = `<img src="${bust(k.preview_url, REV)}" alt="rendered preview" style="max-width:100%;border-radius:8px">`;
     }
   } else if (j.design && j.svg) {
     $("preview3d").innerHTML = j.svg;

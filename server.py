@@ -443,6 +443,8 @@ def _build_reply(session, message, file=None):
             "stl_url": fk.get("stl_url"),
             "source": "imported STEP (deterministic)",
         }
+    if file_ctx:
+        resp["file_intake_debug"] = file_ctx[:600]
     if design:
         resp.update(design={
             "family": design["family"], "params": design},

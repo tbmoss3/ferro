@@ -1,11 +1,10 @@
-// Ferro front door — chat UI v0.3
+// Ferro front door — chat UI v0.7
 const $ = (id) => document.getElementById(id);
 let sessionId = Math.random().toString(36).slice(2, 10);
 let busy = false;
 
 function esc(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;");}
 function fmt(t){
-  // minimal markdown: **bold**, `code`, newlines
   return esc(t)
     .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
     .replace(/`([^`]+)`/g,"<code>$1</code>")
@@ -46,7 +45,6 @@ async function send() {
     const q = await r.json();
     let j = q;
     if (q.accepted) {
-      // async job: poll until the agent + CAD kernel finish
       for (let i = 0; i < 200; i++) {
         await new Promise(res => setTimeout(res, 2000));
         const pr = await fetch(`/result/${sessionId}`);
@@ -58,68 +56,13 @@ async function send() {
       if (j.accepted) { throw new Error("timed out waiting for the design engine"); }
     }
     addMsg("agent", j.reply || "(no reply)");
+
     if (j.kernel && j.kernel.ok) {
-      const k = j.kernel;
-      const src = k.preview_url
-        ? `<img src="${k.preview_url}" alt="kernel-rendered preview" style="max-width:100%;border-radius:8px">`
-        : `<div class="genbody">Kernel verified — render unavailable</div>`;
-      const checks = (k.checks||[]).length
-        ? k.checks.map(n=>`<li>${esc(n)}</li>`).join("")
-        : `<li>Kernel checks passed — single valid solid, dimensions within machining floor</li>`;
-      $("preview").innerHTML = src;
-      $("sheet").textContent = [
-        "FERRO KERNEL-VERIFIED DESIGN PACKET","=".repeat(46),
-        `Kernel: build123d (OpenCASCADE) ${k.build123d||""}`,
-        `Volume: ${k.volume_mm3} mm³   Area: ${k.area_mm2} mm²`,
-        `BBox size: ${(k.size_mm||[]).join(" × ")} mm`,
-        `Material: ${k.material}   Mass: ${k.mass_kg} kg`,
-        `BRep valid: ${k.breps_valid}   Solids: ${k.solids_n}`,
-        "","DFM checks:", ...checks,
-        "", "Artifacts: part.step (CAM-ready), part.stl, preview.png",
-        "Route: ENGINEER REVIEW -> CAD -> CAM (gated)",
-      ].join("\n");
-      const dl = document.createElement("div");
-      dl.className = "dlrow";
-      dl.innerHTML = `<a class="dlbtn" href="${k.step_url}" download>⇩ STEP file</a>` +
-        (k.stl_url ? `<a class="dlbtn ghost" href="${k.stl_url}" download>⇩ STL</a>` : "") +
-        (k.preview_url ? `<a class="dlbtn ghost" href="${k.preview_url}" target="_blank">⇩ Preview</a>` : "");
-      const old = document.querySelector(".dlrow"); if (old) old.remove();
-      $("packet").insertBefore(dl, $("approve"));
-      $("packet").style.display = "block";
-    }
-    if (j.generative) {
-      const g = j.generative;
-      if (!j.kernel || !j.kernel.ok) {
-      $("preview").innerHTML = `<div class="genbanner">
-          <div class="gentitle">GENERATIVE DRAFT — NOT MACHINABLE UNTIL REVIEWED</div>
-          <div class="genrow">Bbox: ${esc(g.bbox||"—")} &nbsp;·&nbsp; Material: ${esc(g.material||"—")}</div>
-          <div class="genbody">Agent-authored OpenSCAD below. Kernel compile + DFM + CAM review required before this touches a machine — the gate is the product.</div>
-        </div>`;
-      $("scad").textContent = g.cad || g.scad || "";
-      $("sheet").textContent = [
-        "FERRO GENERATIVE DESIGN PACKET","=".repeat(46),
-        j.kernel && j.kernel.error ? `Kernel verification FAILED: ${j.kernel.error}` : "Mode: generative (agent-authored CAD code)",
-        `Approx bbox: ${g.bbox||"—"}`,
-        `Material: ${g.material||"—"}`,
-        "", "Verification status:",
-        ...((g.notes&&g.notes.length)?g.notes.map(n=>`  ! ${n}`):["  static checks passed — kernel verification pending"]),
-        "", "Route: ENGINEER REVIEW QUEUE -> CAD -> CAM (gated)",
-      ].join("\n");
-      $("packet").style.display = "block";
-      setApprove("Send to engineer review");
-      $("dfmbox").style.display = "none";
-      }
-    }
-    if (j.design && !(j.kernel && j.kernel.ok)) {
-      $("preview").innerHTML = j.svg || "";
-      $("scad").textContent = j.scad || "";
-      $("sheet").textContent = j.sheet || "";
-      $("packet").style.display = "block";
-      setApprove("Approve for CAD");
-    }
-    if (j.design && !(j.kernel && j.kernel.ok)) {
-      $("massline").textContent = j.mass_kg != null
-        ? `Approx mass: ${j.mass_kg} kg (est. from parametric volume, 45% removal allowance)` : "";
+      buildPacket(j);
+    } else if (j.design) {
+      buildPacket(j);
+    } else if (j.generative) {
+      buildGenerativeBanner(j);
     }
     if (j.dfm_notes && j.dfm_notes.length) {
       $("dfm").innerHTML = j.dfm_notes.map(n => `<li>${esc(n)}</li>`).join("");
@@ -130,28 +73,105 @@ async function send() {
   $("input").focus();
 }
 
-let approved = false;
-function setApprove(label) {
-  const b = $("approve");
-  approved = false;
-  b.textContent = label;
-  b.disabled = false;
-  b.style.display = "";
+// ---- design packet: dense, tabbed, grouped rows ----
+const UNIT_HINT = /(mm|in)$/i;
+function paramRow(k, v) {
+  const label = k.replace(/_/g, " ");
+  const unit = (typeof v === "number" && !UNIT_HINT.test(String(v))) ? " mm" : "";
+  return `<div class="prow"><span class="pk">${esc(label)}</span><span class="pv">${esc(String(v))}${unit}</span></div>`;
 }
-$("approve").addEventListener("click", () => {
-  if (approved) return;
-  approved = true;
-  const b = $("approve");
-  const gen = $("approve").textContent.startsWith("Send");
-  b.textContent = "✓ " + (gen ? "Queued for engineer review — rev locked" : "Approved for CAD — rev locked");
-  b.classList.add("approved");
-  b.disabled = true;
-});
+
+function buildPacket(j) {
+  const k = j.kernel || {};
+  const d = j.design || {};
+  const mode = j.generative ? "Generative" : "Parametric";
+  const mat = (d.params && d.params.material) || d.material || k.material || "6061-T6";
+
+  let rows = "";
+  const src = (d.params && !Array.isArray(d.params)) ? d.params : d;
+  for (const [key, val] of Object.entries(src)) {
+    if (key === "family" || key === "material" || typeof val === "object") continue;
+    if (["mass_kg", "volume_mm3", "area_mm2", "size_mm", "checks", "solids_n", "breps_valid", "ok", "error", "preview_url", "step_url", "stl_url"].includes(key)) continue;
+    rows += paramRow(key, val);
+  }
+  const metrics = k.ok ? `
+    <div class="prow metric"><span class="pk">volume</span><span class="pv">${k.volume_mm3} mm³</span></div>
+    <div class="prow metric"><span class="pk">mass</span><span class="pv">${k.mass_kg} kg</span></div>
+    <div class="prow metric"><span class="pk">bbox</span><span class="pv">${(k.size_mm||[]).join(" × ")} mm</span></div>` : "";
+
+  const code = (d && j.scad) || (j.generative && (j.generative.cad || j.generative.scad)) || "";
+  const checksTxt = (k.checks && k.checks.length)
+    ? k.checks.map(c => "⚠ " + esc(c)).join("<br>")
+    : "No DFM flags — single valid solid, dimensions within machining floor.";
+  const kernelLine = k.ok
+    ? `Kernel: build123d (OpenCASCADE) — verified ✓<br>BRep valid: ${k.breps_valid} · Solids: ${k.solids_n}<br><br>`
+    : (k.error ? "Kernel verification FAILED:<br>" + esc(k.error) + "<br><br>" : "");
+
+  $("packet").innerHTML = `
+    <div class="ptabs">
+      <span class="ptab active" data-t="spec">Spec</span>
+      <span class="ptab" data-t="checks">Checks${(k.checks&&k.checks.length)?" ⚠":""}</span>
+      ${code ? `<span class="ptab" data-t="code">Code</span>` : ""}
+    </div>
+    <div class="ppane" data-pane="spec">
+      <div class="pmeta"><span class="pbadge">${mode}</span><span class="pbadge ghost">${esc(d.family||"part")}</span><span class="pmaterial">${esc(mat)}</span></div>
+      <div class="pscroll">${rows}${metrics}</div>
+      <div class="dlrow">
+        ${k.step_url ? `<a class="dlbtn" href="${k.step_url}" download>⇩ STEP</a>` : ""}
+        ${k.stl_url ? `<a class="dlbtn ghost" href="${k.stl_url}" download>⇩ STL</a>` : ""}
+        ${k.preview_url ? `<a class="dlbtn ghost" href="${k.preview_url}" target="_blank">⇩ Preview</a>` : ""}
+      </div>
+      <button class="approve">Approve for CAD</button>
+    </div>
+    <div class="ppane" data-pane="checks" style="display:none">
+      <div class="pscroll">${kernelLine}${checksTxt}</div>
+    </div>
+    ${code ? `<div class="ppane" data-pane="code" style="display:none"><pre class="pscroll precode">${esc(code)}</pre></div>` : ""}
+  `;
+  $("packet").style.display = "block";
+
+  $("packet").onclick = (ev) => {
+    const t = ev.target.closest(".ptab");
+    if (t) {
+      $("packet").querySelectorAll(".ptab").forEach(x => x.classList.toggle("active", x === t));
+      $("packet").querySelectorAll(".ppane").forEach(p => {
+        p.style.display = (p.dataset.pane === t.dataset.t) ? "" : "none";
+      });
+      return;
+    }
+    if (ev.target.classList.contains("approve")) {
+      const b2 = ev.target;
+      if (b2.classList.contains("approved")) return;
+      b2.classList.add("approved");
+      b2.textContent = "✓ Approved — rev locked";
+      b2.disabled = true;
+    }
+  };
+
+  if (k.preview_url) {
+    $("preview").innerHTML = `<img src="${k.preview_url}" alt="kernel-rendered preview" style="max-width:100%;border-radius:8px">`;
+  } else if (j.design && j.svg) {
+    $("preview").innerHTML = j.svg;
+  }
+}
+
+function buildGenerativeBanner(j) {
+  const g = j.generative;
+  $("preview").innerHTML = `<div class="genbanner">
+      <div class="gentitle">GENERATIVE DRAFT — NOT MACHINABLE UNTIL REVIEWED</div>
+      <div class="genrow">Bbox: ${esc(g.bbox||"—")} · Material: ${esc(g.material||"—")}</div>
+      <div class="genbody">Agent-authored CAD code. Kernel compile + DFM + CAM review required before this touches a machine — the gate is the product.</div>
+    </div>`;
+  $("packet").style.display = "none";
+}
 
 function newChat() {
   sessionId = Math.random().toString(36).slice(2, 10);
   $("chat").innerHTML = "";
-  location.reload();
+  $("packet").style.display = "none";
+  $("packet").innerHTML = "";
+  $("preview").innerHTML = `<div class="empty"><b>Nothing yet.</b><br>Start the conversation — a parametric preview renders here as we talk.</div>`;
+  $("status").textContent = "";
 }
 
 function startWith(text) {

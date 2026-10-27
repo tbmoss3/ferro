@@ -21,19 +21,34 @@ function addMsg(role, text) {
 
 function setBusy(b) {
   busy = b;
-  $("sendbtn").disabled = b;
-  $("sendbtn").textContent = b ? "…" : "Send";
-  $("status").innerHTML = b
-    ? '<span class="dots"><i></i><i></i><i></i></span> agent drafting design'
-    : "";
+  $("sendbtn").textContent = busy ? "…" : "Send";
+  $("sendbtn").title = busy ? "agent working — your message will queue" : "";
+  if (b) {
+    $("status").innerHTML = '<span class="dots"><i></i><i></i><i></i></span> agent drafting design';
+  }
 }
 
+// ---- message queue: Enter while the agent is working queues your message ----
+const queue = [];
+
 async function send() {
-  if (busy) return;
   const text = $("input").value.trim();
   if (!text) return;
   $("input").value = "";
   $("chat").querySelector(".welcome")?.remove();
+  if (busy) {
+    // agent mid-turn: don't drop the message — queue it, show it now
+    queue.push(text);
+    const el = addMsg("user", text);
+    el.classList.add("queued");
+    el.title = "queued — sends when the agent finishes";
+    $("status").innerHTML = `<span class="qtag">queued ${queue.length} — sends when the current design finishes</span>`;
+    return;
+  }
+  await doSend(text);
+}
+
+async function doSend(text) {
   addMsg("user", text);
   setBusy(true);
   try {
@@ -70,7 +85,14 @@ async function send() {
     } else { $("dfmbox").style.display = "none"; }
   } catch (e) { addMsg("agent", "[error] " + e + " — the agent is unreachable; try again."); }
   setBusy(false);
-  $("input").focus();
+  // drain the queue: any messages typed mid-turn fire now, in order
+  if (queue.length) {
+    const next = queue.shift();
+    addMsg("agent", `(queued) running: “${next.slice(0, 60)}${next.length > 60 ? "…" : ""}”`);
+    await doSend(next);
+  } else {
+    $("input").focus();
+  }
 }
 
 // ---- design packet: dense, tabbed, grouped rows ----

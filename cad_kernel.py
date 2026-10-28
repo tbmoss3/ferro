@@ -335,6 +335,20 @@ ax.plot_trisurf(v[:, 0], v[:, 1], v[:, 2], triangles=f[keep],
                 color="#dfe3e9", shade=True,
                 lightsource=LightSource(azdeg=35, altdeg=55),
                 edgecolor=(0.32, 0.35, 0.4), linewidth=0.05, antialiased=False)
+# --- soft ground shadow: two-layer ellipse from the part's XY footprint ---
+from matplotlib.colors import to_rgba
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+zfloor = v[:, 2].min() - 0.10 * ((v.max(0) - v.min(0))[2] or 1)
+cx, cy = v[:, 0].mean(), v[:, 1].mean()
+rx, ry = (v[:, 0].max() - v[:, 0].min()) * 0.46, (v[:, 1].max() - v[:, 1].min()) * 0.46
+ang = np.linspace(0, 2 * np.pi, 48)
+for scale, alpha in ((1.18, 0.10), (0.94, 0.16)):
+    ex = cx + rx * scale * np.cos(ang)
+    ey = cy + ry * scale * np.sin(ang)
+    verts = list(zip(ex, ey, np.full_like(ang, zfloor)))
+    pc = Poly3DCollection([verts], facecolor=to_rgba((0.05, 0.06, 0.08), alpha),
+                          edgecolor="none")
+    ax.add_collection3d(pc)
 b = tm.bounds
 c = (b[0] + b[1]) / 2; span = (b[1] - b[0]).max() / 2 or 1
 ax.set_xlim(c[0]-span, c[0]+span); ax.set_ylim(c[1]-span, c[1]+span); ax.set_zlim(c[2]-span, c[2]+span)

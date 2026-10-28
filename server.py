@@ -528,6 +528,24 @@ def _build_reply(session, message, file=None, design_time_s=None):
             sheet=T.spec_sheet(design, notes),
             mass_kg=design.get("mass_kg", T.mass_kg(design)))
 
+    # ---- CAM routing: verified STEP -> toolpaths -> G-code (Phase C) ----
+    kx = resp.get("kernel") or {}
+    fam_cam = ((resp.get("design") or {}).get("family") or
+               (kx.get("source") and "part"))
+    if kx.get("ok") and kx.get("step_url"):
+        import cam_bridge
+        cam = cam_bridge.route(fam_cam)
+        if cam.get("routed"):
+            try:
+                camres = cam_bridge.generate(session, family=fam_cam,
+                    material=kx.get("material") or "316L")
+                resp["cam"] = {k: v for k, v in camres.items() if k != "warning"} | \
+                    {"routed": True, "gate": "PROTOTYPE — NOT MACHINE-READY — verify on shop floor"}
+            except Exception as e:
+                resp["cam"] = {"routed": True, "ok": False, "error": str(e)[:200]}
+        else:
+            resp["cam"] = {"routed": False, "gate": cam["reason"]}
+
     # ---- quote + persistent order (kernel-measured or STEP-imported) ----
     kx = resp.get("kernel") or {}
     if kx.get("ok") and kx.get("volume_mm3"):
@@ -615,7 +633,8 @@ def artifact(name: str, fn: str):
              "part.glb": "model/gltf-binary",
              "preview.png": "image/png", "drawing.png": "image/png",
              "drawing.svg": "image/svg+xml",
-             "drawing.dxf": "application/dxf"}.get(fn, "application/octet-stream")
+             "drawing.dxf": "application/dxf",
+             "part.nc": "text/plain; charset=utf-8"}.get(fn, "application/octet-stream")
     return FileResponse(p, media_type=media, filename=fn)
 
 ORDER_PAGE = """<!doctype html><html><head><meta charset="utf-8">

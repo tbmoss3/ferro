@@ -94,9 +94,19 @@ Multi-part assemblies (hospital beds, engines, robots, tables) are NOT one machi
 route them to generative mode only for single custom components, else say what we can make.
 If the request fits (or nearly fits) a family, END your message with:
 ```design
-{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar|tube_rack|tube_clamp|grid_plate|extrusion_bracket|pulley|leveling_foot|port_block>", "params": {...}, "material": "6061-T6"}
+{"family": "<bracket|plate|enclosure|flange|spacer|shaft_collar|tube_rack|tube_clamp|grid_plate|extrusion_bracket|pulley|leveling_foot|port_block>", "params": {...}, "material": "316L"}
 ```
 Include absolute values for the keys you're setting. On edits, re-emit the FULL set.
+DEFAULT MATERIAL: if the customer does not name a material, use 316L — and SAY so:
+"Defaulting to 316L stainless (pharma-safe) — 6061 aluminum is cheaper if corrosion isn't a factor."
+CHEAPEST ROUTE RULE (critical): if the product is an assembly or has long thin members —
+IV stands, frames, tables, weldments, tube + base constructions — NEVER machine it from solid billet.
+Propose the fabrication route instead: standard tube/stock members + machined plates/joints,
+welded or bolted. Quote only the machined components through Ferro, describe the rest as
+fabrication, and ask before hogging anything expensive out of solid. For multi-piece products,
+ask about assembly preferences (weld vs bolt) and filler material if welding. State plainly
+which pieces Ferro will model and which are stock lengths/fabrication.
+
 MANDATORY SELF-CHECK before replying: re-read the customer's message and verify every
 number they stated (dimensions, hole counts, hole sizes, thicknesses) is reflected
 in your design/scad block. If they said six holes, hole_count must be 6. State the
@@ -254,8 +264,8 @@ def fallback_reply(message):
     else:
         return ("Tell me a bit more: what does the part mount to, rough size, material, "
                 "and how many? Or pick a family — bracket, plate, enclosure."), None, []
-    design = {"family": fam, "params": params, "material": "6061-T6"}
-    return (f"Let's start with a parametric {fam} in 6061-T6 — preview and packet below. "
+    design = {"family": fam, "params": params, "material": "316L"}
+    return (f"Let's start with a parametric {fam} in 316L — preview and packet below. "
             "(Offline-mode defaults; agent unavailable.)"), design, []
 
 def _parse_agent_reply(st, out, ok):
@@ -286,7 +296,7 @@ def _parse_agent_reply(st, out, ok):
                     fam = d.get("family", "").lower()
                     if fam in T.SCHEMAS:
                         design = {"family": fam, "params": d.get("params", {}),
-                                  "material": d.get("material", "6061-T6")}
+                                  "material": d.get("material", "316L")}
                     reply = DESIGN_RE.sub("", out).strip() or "Here you go."
                 except json.JSONDecodeError:
                     pass
@@ -322,10 +332,10 @@ def kernel_verify(session, clean=None, gen_src=None, header=None):
         import cad_kernel as K
     except Exception:
         return None, "kernel not installed on this host"
-    material = (header or {}).get("material") or (clean or {}).get("material", "6061-T6")
+    material = (header or {}).get("material") or (clean or {}).get("material", "316L")
     material = material.split(",")[0].strip()
     if material not in K.DENSITIES:
-        material = "6061-T6"
+        material = "316L"
     name = session
     if gen_src is not None:
         m = K.run_kernel(gen_src, name)
@@ -399,8 +409,8 @@ def _build_reply(session, message, file=None):
         png, _ = K.render_png(session)
         drawing = K.render_drawing(session)
         fk = dict(file_kernel)
-        fk["mass_kg"] = round(fk["volume_mm3"] * K.DENSITIES.get("6061-T6", 2700) * 1e-9, 3)
-        fk["material"] = "6061-T6 (assumed — confirm)"
+        fk["mass_kg"] = round(fk["volume_mm3"] * K.DENSITIES.get("316L", 8000) * 1e-9, 3)
+        fk["material"] = "316L (assumed — confirm)"
         fk["checks"] = []
         fk["rev"] = int(_t.time())
         fk["preview_url"] = f"/artifacts/{session}/preview.png" if png else None
@@ -512,7 +522,7 @@ def _build_reply(session, message, file=None):
         import quotes, time as _t, secrets as _sec
         q = quotes.quote(
             kx["volume_mm3"], kx.get("area_mm2") or 0,
-            material=kx.get("material") or "6061-T6",
+            material=kx.get("material") or "316L",
             family=(resp.get("design") or {}).get("family"),
             solids=kx.get("solids_n") or 1)
         oid = order_upsert(

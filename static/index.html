@@ -126,6 +126,7 @@
       border:2px dashed var(--acc); border-radius:14px; color:var(--acc);
       display:flex; align-items:center; justify-content:center; font-size:16px;
       background:rgba(232,133,61,.07); z-index:99; pointer-events:none; }
+  .hintline { font-size:11.5px; color:var(--faint); margin:7px 2px 0; text-align:center; width:100%; }
   #input { flex:1; background:#111319; color:var(--txt);
            border:1px solid var(--line); border-radius:10px;
            padding:13px 15px; font-size:15px; outline:none; }
@@ -230,6 +231,7 @@
     .chip { font-size:11.5px; padding:7px 11px; }
     #inputbar { flex-wrap:wrap; }
     #sendbtn { width:100%; padding:12px 0; margin-top:6px; }
+  .hintline { font-size:11px; color:var(--faint); margin:6px 2px 0; text-align:center; width:100%; }
     .pk { min-width:86px; }
     .prow { font-size:12.5px; }
     .ptab { padding:6px 11px; font-size:11.5px; }
@@ -321,6 +323,7 @@
         <input id="fileinput" type="file" style="display:none"
                accept=".png,.jpg,.jpeg,.webp,.pdf,.step,.stp,.dxf">
         <input id="input" placeholder="Describe the part you need…" aria-label="Describe the part you need">
+        <div class="hintline" id="hintline">⏱ simple parts take ~30s · complex multi-part designs 2–5 min — the agent verifies every dimension with a real CAD kernel</div>
         <button id="sendbtn" onclick="send()">Send</button>
       </div>
       <div id="filechip" onclick="clearAttachment()" title="click to remove"></div>

@@ -108,7 +108,9 @@ async function doSend(text, file) {
         const p = await pr.json();
         if (p.status === "done" || p.status === "error") { j = p.result || {reply: "[no result]"}; break; }
         $("status").innerHTML = '<span class="dots"><i></i><i></i><i></i></span> ' +
-          (i % 2 ? "agent drafting design" : "CAD kernel verifying geometry");
+          (i % 3 === 0 ? "agent drafting design" : i % 3 === 1
+            ? "CAD kernel verifying geometry — complex parts take 2–5 min"
+            : "computing exact volume, mass & DFM checks…");
       }
       if (j.accepted) { throw new Error("timed out waiting for the design engine"); }
     }

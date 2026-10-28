@@ -243,7 +243,7 @@ def normalize(family, params):
         clean["port_count"] = int(clean["port_count"])
     clean["family"] = family
     if "material" not in clean:
-        clean["material"] = "6061-T6"
+        clean["material"] = "316L"  # partner default: 316L unless specified (pharma-safe)
     return clean, notes
 
 

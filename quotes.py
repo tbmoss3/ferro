@@ -28,7 +28,7 @@ FAMILY_COMPLEXITY = {
 }
 
 
-def quote(volume_mm3, area_mm2, material="6061-T6", family=None, solids=1):
+def quote(volume_mm3, area_mm2, material="316L", family=None, solids=1):
     """Return a price + lead estimate from kernel-measured geometry (mm^3)."""
     mat = MATERIAL_PRICE.get(material, 11.0)
     mrr = MRR.get(material, 9.0)

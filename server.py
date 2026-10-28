@@ -553,6 +553,24 @@ async def chat(req: Request):
 def result(session: str):
     cur = RESULTS.get(session)
     if not cur:
+        # restart recovery: latest order for this session, from SQLite
+        with DB_LOCK:
+            con = db()
+            con.row_factory = sqlite3.Row
+            row = con.execute("SELECT * FROM orders WHERE session=? ORDER BY updated DESC LIMIT 1", (session,)).fetchone()
+            con.close()
+        if row:
+            import json as _j
+            r = {
+                "reply": row["reply"] or "",
+                "design": _j.loads(row["design"] or "null"),
+                "kernel": _j.loads(row["kernel"] or "null"),
+                "quote": _j.loads(row["quote"] or "null"),
+                "order_id": row["order_id"],
+                "order_url": f"/order/{row['order_id']}",
+                "dfm_notes": [],
+            }
+            return {"status": "done", "result": r}
         return {"status": "none"}
     return {"status": cur["status"], "result": cur.get("result")}
 
@@ -562,7 +580,7 @@ from fastapi.responses import FileResponse
 def artifact(name: str, fn: str):
     if "/" in fn or ".." in fn or "/" in name or ".." in name:
         return {"error": "bad path"}
-    p = ROOT / "artifacts" / name / fn
+    p = DATA_DIR / "artifacts" / name / fn
     if not p.exists():
         return {"error": "not found"}
     media = {"part.step": "application/step", "part.stl": "model/stl",

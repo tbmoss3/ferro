@@ -7,11 +7,11 @@ All numbers are shop-rate assumptions; refine with calibration data as it accumu
 # $/kg stock, small-quantity aluminum/steel/plastic round & plate retail
 MATERIAL_PRICE = {
     "6061-T6": 11.0, "7075-T6": 22.0, "steel-1018": 3.5,
-    "304-SS": 9.0, "316L": 14.0, "PEEK": 120.0, "delrin": 18.0,
+    "4140": 5.5, "304-SS": 9.0, "316L": 14.0, "PEEK": 120.0, "delrin": 18.0,
 }
 # rough+finish removal rate, cm^3/min (conservative shop milling/turning)
 MRR = {
-    "6061-T6": 9.0, "7075-T6": 7.0, "steel-1018": 4.0,
+    "6061-T6": 9.0, "7075-T6": 7.0, "steel-1018": 4.0, "4140": 3.8,
     "304-SS": 3.5, "316L": 3.0, "PEEK": 12.0, "delrin": 15.0,
 }
 SHOP_RATE = 75.0     # $/hr machine+operator
@@ -57,5 +57,5 @@ def quote(volume_mm3, area_mm2, material="316L", family=None, solids=1):
 
 
 def _density(material):
-    return {"6061-T6": 2.70, "7075-T6": 2.81, "steel-1018": 7.87,
-            "304-SS": 7.90, "316L": 8.00, "PEEK": 1.32, "delrin": 1.41}.get(material, 2.70)
+    return {"6061-T6": 2.70, "7075-T6": 2.81, "steel-1018": 7.87, "4140": 7.85,
+            "304-SS": 7.90, "316L": 8.00, "PEEK": 1.32, "delrin": 1.41}.get(material, 8.00)

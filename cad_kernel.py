@@ -14,7 +14,7 @@ PY = os.environ.get("FERRO_CAD_PY") or str(ROOT / ".venv-cad" / "bin" / "python"
 # kg/m^3 — must mirror templates.MATERIALS densities (kg/mm^3 * 1e9)
 DENSITIES = {
     "6061-T6": 2700, "7075-T6": 2810, "steel-1018": 7870,
-    "304-SS": 7900, "316L": 8000, "PEEK": 1320, "delrin": 1410,
+    "4140": 7850, "304-SS": 7900, "316L": 8000, "PEEK": 1320, "delrin": 1410,
 }
 
 # runs INSIDE the cad subprocess (written to a temp script, run with PY)

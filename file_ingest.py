@@ -10,8 +10,8 @@ import base64, json, os, subprocess, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-UPLOADS = ROOT / "uploads"
-UPLOADS.mkdir(exist_ok=True)
+UPLOADS = Path(os.environ.get("FERRO_DATA_DIR", ROOT / "data")) / "uploads"
+UPLOADS.mkdir(parents=True, exist_ok=True)
 
 ALLOWED = {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".step", ".stp", ".dxf"}
 MAX_BYTES = 15 * 1024 * 1024

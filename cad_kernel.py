@@ -7,8 +7,8 @@ import json, math, os, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
-ARTIFACTS = ROOT / "artifacts"
-ARTIFACTS.mkdir(exist_ok=True)
+ARTIFACTS = Path(os.environ.get("FERRO_DATA_DIR", ROOT / "data")) / "artifacts"
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 PY = os.environ.get("FERRO_CAD_PY") or str(ROOT / ".venv-cad" / "bin" / "python")
 
 # kg/m^3 — must mirror templates.MATERIALS densities (kg/mm^3 * 1e9)

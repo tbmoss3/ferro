@@ -182,6 +182,15 @@ function buildPacket(j) {
     </div>
     <div class="ppane" data-pane="spec">
       <div class="pmeta"><span class="pbadge">${mode}</span><span class="pbadge ghost">${esc(d.family||"part")}</span><span class="pmaterial">${esc(mat)}</span></div>
+      ${j.quote ? `
+      <div class="quotecard">
+        <div class="qprice">$${j.quote.price} <span class="qlead">· ~${j.quote.lead_days} days</span></div>
+        <div class="qdim">est. from kernel-measured geometry · ${j.quote.machine_hrs} hr machine · ${j.quote.stock_kg} kg stock</div>
+        <div class="qrow">
+          <a class="dlbtn ghost" href="${j.order_url}" target="_blank">⇗ order ${j.order_id}</a>
+          <a class="dlbtn ghost" href="mailto:?subject=Ferro%20design%20${j.order_id}&body=${encodeURIComponent("My Ferro design packet (order " + j.order_id + "): " + location.origin + (j.order_url||""))}">✉ email my packet</a>
+        </div>
+      </div>` : ""}
       <div class="pscroll">${rows}${metrics}</div>
       <div class="dlrow">
         ${k.step_url ? `<a class="dlbtn" href="${bust(k.step_url, REV)}" download>⇩ STEP</a>` : ""}

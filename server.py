@@ -9,8 +9,62 @@ from fastapi.staticfiles import StaticFiles
 import templates as T
 
 ROOT = Path(__file__).parent
-STATE_DIR = ROOT / "sessions"
+DATA_DIR = Path(os.environ.get("FERRO_DATA_DIR", ROOT / "data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+STATE_DIR = DATA_DIR / "sessions"
 STATE_DIR.mkdir(exist_ok=True)
+
+import sqlite3, threading as _th
+DB_LOCK = _th.Lock()
+DB = str(DATA_DIR / "ferro.db")
+
+def db():
+    con = sqlite3.connect(DB, timeout=30)
+    con.execute("PRAGMA journal_mode=WAL")
+    return con
+
+def db_init():
+    with DB_LOCK:
+        con = db()
+        con.execute("""CREATE TABLE IF NOT EXISTS orders (
+            order_id TEXT PRIMARY KEY,
+            session TEXT, created TEXT, updated TEXT,
+            family TEXT, request TEXT, reply TEXT,
+            design TEXT, kernel TEXT, quote TEXT
+        )""")
+        con.commit()
+        con.close()
+
+db_init()
+
+def order_upsert(order_id, session, family, request, reply, design, kernel, quote):
+    import time as _t, json as _j
+    now = _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime())
+    with DB_LOCK:
+        con = db()
+        row = con.execute("SELECT order_id FROM orders WHERE session=?", (session,)).fetchone()
+        if row:
+            con.execute("""UPDATE orders SET updated=?, family=?, request=?, reply=?,
+                design=?, kernel=?, quote=? WHERE order_id=?""",
+                (now, family, request, reply, _j.dumps(design), _j.dumps(kernel),
+                 _j.dumps(quote), row[0]))
+            order_id = row[0]
+        else:
+            con.execute("""INSERT INTO orders (order_id, session, created, updated, family,
+                request, reply, design, kernel, quote) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (order_id, session, now, now, family, request, reply,
+                 _j.dumps(design), _j.dumps(kernel), _j.dumps(quote)))
+        con.commit()
+        con.close()
+    return order_id
+
+def order_get(order_id):
+    with DB_LOCK:
+        con = db()
+        con.row_factory = sqlite3.Row
+        row = con.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
+        con.close()
+    return dict(row) if row else None
 
 AGENT_SYS = """You are Ferro's design intake agent for a bespoke CNC machine shop.
 Your job: turn a natural-language customer request into a concrete design, ask at most
@@ -451,6 +505,24 @@ def _build_reply(session, message, file=None):
             svg=T.render_svg(design), scad=T.render_scad(design),
             sheet=T.spec_sheet(design, notes),
             mass_kg=design.get("mass_kg", T.mass_kg(design)))
+
+    # ---- quote + persistent order (kernel-measured or STEP-imported) ----
+    kx = resp.get("kernel") or {}
+    if kx.get("ok") and kx.get("volume_mm3"):
+        import quotes, time as _t, secrets as _sec
+        q = quotes.quote(
+            kx["volume_mm3"], kx.get("area_mm2") or 0,
+            material=kx.get("material") or "6061-T6",
+            family=(resp.get("design") or {}).get("family"),
+            solids=kx.get("solids_n") or 1)
+        oid = order_upsert(
+            _sec.token_hex(4), session,
+            (resp.get("design") or {}).get("family") or kx.get("source") or "part",
+            message[:500], resp.get("reply", ""),
+            resp.get("design") or {}, kx, q)
+        resp["quote"] = q
+        resp["order_id"] = oid
+        resp["order_url"] = f"/order/{oid}"
     return resp
 
 def _worker(session, message, file=None):
@@ -499,6 +571,66 @@ def artifact(name: str, fn: str):
              "drawing.svg": "image/svg+xml",
              "drawing.dxf": "application/dxf"}.get(fn, "application/octet-stream")
     return FileResponse(p, media_type=media, filename=fn)
+
+ORDER_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<title>Ferro order __OID__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ body{font-family:system-ui,sans-serif;background:#0d0f13;color:#ecebe6;margin:0;padding:24px;}
+ .card{max-width:640px;margin:0 auto;background:#171a20;border:1px solid #2e343f;border-radius:14px;padding:22px;}
+ h1{font-size:20px;margin:0 0 4px;} .dim{color:#a3aab6;} .acc{color:#e8853d;}
+ .row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #232830;font-size:14px;}
+ .big{font-size:22px;font-weight:800;}
+ img{max-width:100%;border-radius:10px;margin:10px 0;}
+ a{color:#e8853d;} .badge{display:inline-block;border:1px solid #e8853d55;color:#e8853d;
+   border-radius:99px;padding:3px 10px;font-size:12px;margin-right:6px;}
+</style></head><body><div class="card">
+<h1>FERRO <span class="acc">.</span> order <span class="acc">__OID__</span></h1>
+<div class="dim">__FAMILY__ · created __CREATED__ · updated __UPDATED__</div>
+<div class="row"><span class="dim">Est. price</span><span class="big acc">$__PRICE__</span></div>
+<div class="row"><span class="dim">Lead time</span><span>~__LEAD__ days</span></div>
+<div class="row"><span class="dim">Machine time</span><span>__HRS__ hr est.</span></div>
+<div class="row"><span class="dim">Stock</span><span>__STOCK__ kg __MAT__</span></div>
+<div class="row"><span class="dim">Status</span><span class="badge">awaiting design approval</span></div>
+<img src="__PREVIEW__" alt="part render">
+<p class="dim">__BASIS__</p>
+<p><a href="/">← back to the design agent</a></p>
+</div></body></html>"""
+
+@app.get("/order/{oid}")
+def order_page(oid: str):
+    o = order_get(oid)
+    if not o:
+        return {"error": "order not found"}
+    import json as _j
+    q = _j.loads(o.get("quote") or "{}")
+    k = _j.loads(o.get("kernel") or "{}")
+    page = (ORDER_PAGE
+        .replace("__OID__", oid)
+        .replace("__FAMILY__", str(o.get("family") or "part"))
+        .replace("__CREATED__", str(o.get("created") or ""))
+        .replace("__UPDATED__", str(o.get("updated") or ""))
+        .replace("__PRICE__", str(q.get("price", "-")))
+        .replace("__LEAD__", str(q.get("lead_days", "-")))
+        .replace("__HRS__", str(q.get("machine_hrs", "-")))
+        .replace("__STOCK__", str(q.get("stock_kg", "-")))
+        .replace("__MAT__", str(k.get("material") or ""))
+        .replace("__PREVIEW__", k.get("preview_url") or "")
+        .replace("__BASIS__", str(q.get("basis") or "")))
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(page)
+
+@app.get("/orders")
+def orders_list():
+    with DB_LOCK:
+        con = db()
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT order_id, session, family, created, quote FROM orders ORDER BY updated DESC LIMIT 100").fetchall()
+        con.close()
+    import json as _j
+    return [{"order_id": r["order_id"], "session": r["session"], "family": r["family"],
+             "created": r["created"], "quote": _j.loads(r["quote"] or "{}")}
+            for r in rows]
 
 @app.get("/health")
 def health():

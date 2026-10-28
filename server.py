@@ -30,14 +30,24 @@ def db_init():
             order_id TEXT PRIMARY KEY,
             session TEXT, created TEXT, updated TEXT,
             family TEXT, request TEXT, reply TEXT,
-            design TEXT, kernel TEXT, quote TEXT
+            design TEXT, kernel TEXT, quote TEXT,
+            design_time_s REAL, price_status TEXT DEFAULT 'pending',
+            first_pass_yield INTEGER
         )""")
+        # migrate pre-existing db
+        for col, ddl in (("design_time_s", "REAL"), ("price_status", "TEXT DEFAULT 'pending'"),
+                         ("first_pass_yield", "INTEGER")):
+            try:
+                con.execute(f"ALTER TABLE orders ADD COLUMN {col} {ddl}")
+            except Exception:
+                pass
         con.commit()
         con.close()
 
 db_init()
 
-def order_upsert(order_id, session, family, request, reply, design, kernel, quote):
+def order_upsert(order_id, session, family, request, reply, design, kernel, quote,
+                 design_time_s=None):
     import time as _t, json as _j
     now = _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime())
     with DB_LOCK:
@@ -45,15 +55,17 @@ def order_upsert(order_id, session, family, request, reply, design, kernel, quot
         row = con.execute("SELECT order_id FROM orders WHERE session=?", (session,)).fetchone()
         if row:
             con.execute("""UPDATE orders SET updated=?, family=?, request=?, reply=?,
-                design=?, kernel=?, quote=? WHERE order_id=?""",
+                design=?, kernel=?, quote=?, design_time_s=?, price_status='pending'
+                WHERE order_id=?""",
                 (now, family, request, reply, _j.dumps(design), _j.dumps(kernel),
-                 _j.dumps(quote), row[0]))
+                 _j.dumps(quote), design_time_s, row[0]))
             order_id = row[0]
         else:
             con.execute("""INSERT INTO orders (order_id, session, created, updated, family,
-                request, reply, design, kernel, quote) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                request, reply, design, kernel, quote, design_time_s)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (order_id, session, now, now, family, request, reply,
-                 _j.dumps(design), _j.dumps(kernel), _j.dumps(quote)))
+                 _j.dumps(design), _j.dumps(kernel), _j.dumps(quote), design_time_s))
         con.commit()
         con.close()
     return order_id
@@ -369,7 +381,7 @@ import threading
 RESULTS = {}   # session -> {"status": "working"/"done"/"error", "result": resp}
 LOCKS = {}
 
-def _build_reply(session, message, file=None):
+def _build_reply(session, message, file=None, design_time_s=None):
     st = load_state(session)
 
     # ---- file ingestion: build a context block for the brain ----
@@ -525,20 +537,29 @@ def _build_reply(session, message, file=None):
             material=kx.get("material") or "316L",
             family=(resp.get("design") or {}).get("family"),
             solids=kx.get("solids_n") or 1)
+        import time as _tt
+        dts = round(_tt.time() - TURN_START.pop(session, _tt.time()), 1)
         oid = order_upsert(
             _sec.token_hex(4), session,
             (resp.get("design") or {}).get("family") or kx.get("source") or "part",
             message[:500], resp.get("reply", ""),
-            resp.get("design") or {}, kx, q)
-        resp["quote"] = q
-        resp["order_id"] = oid
-        resp["order_url"] = f"/order/{oid}"
+            resp.get("design") or {}, kx, q, design_time_s=dts)
+        # pricing is INTERNAL-ONLY (JV policy 2026-10-28): estimates live in the DB
+        # for shop review; customers see design packet only, no price.
+        resp.pop("quote", None)
+        resp.pop("order_id", None)
+        resp.pop("order_url", None)
     return resp
 
+TURN_START = {}
+
 def _worker(session, message, file=None):
+    import time as _t
+    TURN_START[session] = _t.time()
     try:
         RESULTS[session] = {"status": "working"}
-        RESULTS[session] = {"status": "done", "result": _build_reply(session, message, file)}
+        RESULTS[session] = {"status": "done",
+            "result": _build_reply(session, message, file)}
     except Exception as e:
         RESULTS[session] = {"status": "error", "result": {"reply": f"[error] {e}"}}
 
@@ -575,11 +596,8 @@ def result(session: str):
                 "reply": row["reply"] or "",
                 "design": _j.loads(row["design"] or "null"),
                 "kernel": _j.loads(row["kernel"] or "null"),
-                "quote": _j.loads(row["quote"] or "null"),
-                "order_id": row["order_id"],
-                "order_url": f"/order/{row['order_id']}",
                 "dfm_notes": [],
-            }
+            }  # quote/order stay internal-only (JV policy 2026-10-28)
             return {"status": "done", "result": r}
         return {"status": "none"}
     return {"status": cur["status"], "result": cur.get("result")}
@@ -657,7 +675,9 @@ def orders_list():
         con.close()
     import json as _j
     return [{"order_id": r["order_id"], "session": r["session"], "family": r["family"],
-             "created": r["created"], "quote": _j.loads(r["quote"] or "{}")}
+             "created": r["created"], "quote": _j.loads(r["quote"] or "{}"),
+             "design_time_s": r["design_time_s"], "price_status": r["price_status"],
+             "first_pass_yield": r["first_pass_yield"]}
             for r in rows]
 
 @app.get("/health")

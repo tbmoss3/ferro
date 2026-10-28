@@ -110,6 +110,18 @@ print("GCODE_LINES", len(txt.splitlines()))
 '''
 
 
+def generate_remote(cam_url, step_b64, family, material, size_mm):
+    """Call the CAM sidecar (Dockerfile.cam) instead of local freecadcmd."""
+    import urllib.request
+    payload = json.dumps({"step_b64": step_b64, "family": family,
+                          "material": material, "size_mm": size_mm}).encode()
+    req = urllib.request.Request(cam_url.rstrip("/") + "/generate",
+                                 data=payload,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=280) as r:
+        return json.loads(r.read())
+
+
 def route(family):
     """CAM routing decision for a family."""
     if family in CAM_OK_FAMILIES:

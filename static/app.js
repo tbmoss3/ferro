@@ -202,8 +202,8 @@ function buildPacket(j) {
         ${k.stl_url ? `<a class="dlbtn ghost" href="${bust(k.stl_url, REV)}" download>⇩ STL</a>` : ""}
       </div>
       ${j.cam ? (j.cam.routed && j.cam.gcode_url
-        ? `<div class="camrow">⚙ <b>CAM</b> · ${esc(j.cam.machine)} · linuxcnc · ${j.cam.gcode_lines} lines · <a class="dlbtn ghost camg" href="${bust(j.cam.gcode_url, REV)}" download>⇩ G-code</a> <span class="camgate">⚠ prototype — not machine-ready</span></div>`
-        : `<div class="camrow gated">⚙ <b>CAM</b> · ${esc(j.cam.gate || j.cam.error || "manual CAM — unavailable in this environment")}</div>`) : ""}
+        ? `<div class="camrow">⚙ <b>CAM</b> · ${esc(j.cam.machine)} · linuxcnc · ${j.cam.gcode_lines} lines · <a class="dlbtn ghost camg" href="${bust(j.cam.gcode_url, REV)}" download>⇩ G-code</a> <span class="camgate">${j.cam.verify ? (j.cam.verify.ok ? "✓ sim gate: passed · " + (j.cam.verify.stats.cut_mm||0) + "mm cut · max depth " + (j.cam.verify.stats.max_depth_mm||0) + "mm" : "⛔ sim gate: BLOCKED") : ""} ⚠ prototype — not machine-ready</span></div>`
+        : `<div class="camrow gated">⚙ <b>CAM</b> · ${esc(j.cam.gate || j.cam.error || "manual CAM — unavailable in this environment")}${j.cam.verify && !j.cam.verify.ok ? " — ⛔ " + esc((j.cam.verify.blocked||[]).slice(0,2).join("; ")) : ""}</div>`) : ""}
       <button class="approve">Approve for CAD</button>
     </div>
     <div class="ppane" data-pane="checks" style="display:none">

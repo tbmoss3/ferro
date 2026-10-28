@@ -536,10 +536,41 @@ def _build_reply(session, message, file=None, design_time_s=None):
         import cam_bridge
         cam = cam_bridge.route(fam_cam)
         if cam.get("routed"):
+            cam_url = os.environ.get("CAM_URL", "")
             try:
-                camres = cam_bridge.generate(session, family=fam_cam,
-                    material=kx.get("material") or "316L")
-                resp["cam"] = {k: v for k, v in camres.items() if k != "warning"} | \
+                if cam_url:
+                    step_p = DATA_DIR / "artifacts" / session / "part.step"
+                    if step_p.exists():
+                        import base64 as _b64
+                        camres = cam_bridge.generate_remote(
+                            cam_url, _b64.b64encode(step_p.read_bytes()).decode(),
+                            fam_cam, kx.get("material") or "316L",
+                            kx.get("size_mm") or [90, 90, 12])
+                        if camres.get("ok"):
+                            nc = DATA_DIR / "artifacts" / session / "part.nc"
+                            nc.parent.mkdir(parents=True, exist_ok=True)
+                            nc.write_text(camres.get("gcode") or "")
+                            camres["gcode_url"] = f"/artifacts/{session}/part.nc"
+                        else:
+                            camres["gcode_url"] = None
+                    else:
+                        camres = {"ok": False, "error": "no verified STEP"}
+                else:
+                    camres = cam_bridge.generate(session, family=fam_cam,
+                        material=kx.get("material") or "316L")
+                # ---- simulation/verification gate (deterministic) ----
+                nc = camres.get("gcode_url") and DATA_DIR / "artifacts" / session / "part.nc"
+                if camres.get("ok") and nc and nc.exists():
+                    import gcode_verify
+                    sz = kx.get("size_mm") or [90, 90, 12]
+                    stock = [s * 1.15 + 3 for s in sz[:3]]
+                    v = gcode_verify.verify_file(
+                        nc, stock, kx.get("material") or "316L", tool_d=6.0)
+                    camres["verify"] = {
+                        "ok": v["ok"], "blocked": v["blocked"],
+                        "warnings": v["warnings"], "stats": v["stats"],
+                        "gate": v["gate"]}
+                resp["cam"] = {k2: v2 for k2, v2 in camres.items() if k2 != "warning"} | \
                     {"routed": True, "gate": "PROTOTYPE — NOT MACHINE-READY — verify on shop floor"}
             except Exception as e:
                 resp["cam"] = {"routed": True, "ok": False, "error": str(e)[:200]}

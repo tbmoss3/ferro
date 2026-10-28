@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /app
-COPY server.py templates.py cad_kernel.py file_ingest.py ./
+COPY server.py templates.py cad_kernel.py file_ingest.py quotes.py ./
 COPY static ./static
 # OCCT/build123d headless system deps (libGL etc.) + FastAPI app deps
 RUN apt-get update && apt-get install -y --no-install-recommends \

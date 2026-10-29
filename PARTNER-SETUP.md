@@ -1,55 +1,20 @@
 # Ferro — Partner Setup & First Scrap Test
 
-**What you'll do:** (1) flip two switches in the Railway dashboard so the CAM
-service runs in production, (2) design a part end-to-end in the browser,
-(3) download G-code and run it on scrap.
+**What you'll do:** (1) design a part end-to-end in the browser, (2) download
+G-code and run it on scrap.
 
-Takes ~15 minutes of clicking. Nothing here can break the live site — the
-main app already runs without the CAM service.
+CAM is **already live in production** (as of Oct 29, 2026): the CAM service
+runs at https://ferro-cam-production.up.railway.app behind the main site,
+and the G-code dialect is set to `linuxcnc`. Nothing to configure — skip to
+Part 1.
+
+*If the dialect ever needs changing:* Benton's side sets the
+`FERRO_CAM_POST` variable on the `ferro` service (options: `linuxcnc`,
+`grbl`, `centroid`, `mach3_mach4`, `fanuc`, `generic`).
 
 ---
 
-## Part 1 — Enable CAM in production (one time, dashboard only)
-
-The Railway API token Benton has can create services from the GitHub repo but
-can't attach a custom Dockerfile, so this part is clicks, not code.
-
-**Step 1 — Add the CAM service (~5 min)**
-1. Log in at https://railway.app → project **Ferro**.
-2. Click **+ New Service** (or "+ Create Service") → **Deploy from GitHub repo**.
-3. Pick the repo **tbmoss3/ferro**. Railway will start building the MAIN app
-   Dockerfile by default — that's fine, we fix it in the next step.
-4. Open the new service → **Settings** → find the **Build** section →
-   **Custom Dockerfile path (or "Dockerfile location")** → set it to:
-
-       Dockerfile.cam
-
-   (The file is already in the repo root — it builds a small FastAPI service
-   with FreeCAD baked in for toolpath generation. The build is large (~10–15
-   min first time) because it installs FreeCAD. Subsequent builds are cached.)
-
-5. Wait for the build to finish (Deployments tab shows **SUCCESS**).
-
-**Step 2 — Point the main app at the CAM service (~2 min)**
-1. Back in the project view, click the **ferro** service (the main one) →
-   **Variables** → **Raw Editor**.
-2. Add these two variables:
-
-       CAM_URL=https://<your-cam-service-domain>.up.railway.app
-       FERRO_CAM_POST=linuxcnc
-
-   - Find the CAM service's domain on its Settings page ("Generate Domain"
-     if it has none).
-   - `FERRO_CAM_POST` picks the G-code dialect for your controller.
-     Options: `linuxcnc`, `grbl`, `centroid`, `mach3_mach4`, `fanuc`,
-     `generic`. If your mill runs LinuxCNC, leave it as `linuxcnc`.
-3. The main app redeploys automatically (takes ~2 min).
-
-**Step 3 — Sanity check**
-- Visit `https://<your-cam-service-domain>.up.railway.app/health` →
-  should show `{"ok":true,"freecad":true,...}`.
-
-## Part 2 — Design a part end-to-end (~3–5 min)
+## Part 1 — Design a part end-to-end (~3–5 min)
 
 1. Go to https://ferro.up.railway.app → **Describe your part**.
    Example for a first test — simple, forgiving geometry:
@@ -69,7 +34,7 @@ can't attach a custom Dockerfile, so this part is clicks, not code.
    family runs on the lathe and Ferro won't fake it (manual CAM).
 5. Click **⇩ G-code** and also **⇩ STEP** (the STEP is the design reference).
 
-## Part 3 — Run it on scrap (the careful part)
+## Part 2 — Run it on scrap (the careful part)
 
 The G-code is **PROTOTYPE GRADE**. Treat the first run like any new program:
 

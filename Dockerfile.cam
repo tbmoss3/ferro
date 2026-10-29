@@ -1,9 +1,9 @@
-FROM condaforge/linux-64:latest
-LABEL io.railway.custom=("Ferro CAM sidecar")
+FROM mambaorg/micromamba:jammy
+LABEL io.railway.custom=("Ferro CAM sidecar — FreeCAD toolpath generator + sim gate")
 WORKDIR /app
 COPY cam_service.py cam_bridge.py gcode_verify.py ./
-RUN conda install -y -c conda-forge freecad fastapi uvicorn python-fastjsonschema \
-    || micromamba install -y -c conda-forge freecad fastapi uvicorn
+RUN micromamba install -y -n base -c conda-forge freecad fastapi uvicorn \
+    && micromamba clean -a -y
 ENV PORT=8812
 EXPOSE 8812
 CMD ["sh", "-c", "uvicorn cam_service:app --host 0.0.0.0 --port ${PORT:-8812}"]

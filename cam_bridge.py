@@ -19,7 +19,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 ARTIFACTS = Path(__file__).parent / "data" / "artifacts"
-FREECADCMD = Path.home() / "freecad-env" / "bin" / "freecadcmd"
+
+
+def _find_freecad():
+    import os as _os
+    import shutil as _sh
+    p = _os.environ.get("FREECADCMD")
+    if p and Path(p).exists():
+        return Path(p)
+    w = _sh.which("freecadcmd")
+    if w:
+        return Path(w)
+    return Path.home() / "freecad-env" / "bin" / "freecadcmd"  # dev box fallback
+
+
+FREECADCMD = _find_freecad()
 
 CAM_OK_FAMILIES = {
     "plate", "bracket", "enclosure", "flange", "spacer",

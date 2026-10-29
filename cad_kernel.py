@@ -77,7 +77,10 @@ FAMILY_BUILDERS = {
     "plate": r'''
 from build123d import *
 L={length}; W={width}; T={thickness}; D={hole_d}; N={hole_count}
-inset = min(0.08*min(L,W), 15.0)
+inset = {hole_inset}
+if inset <= 0:
+    inset = min(0.08*min(L,W), 15.0)
+inset = min(inset, L/2 - D/2 - 2, W/2 - D/2 - 2)  # keep holes off the edge
 rows = 2 if (N % 2 == 0 and N >= 4) else 1
 cols = (N + rows - 1)//rows
 part = Box(L, W, T)
@@ -253,6 +256,7 @@ def family_script(family, params):
         "length": params.get("length"), "width": params.get("width"),
         "thickness": params.get("thickness"), "hole_d": params.get("hole_d"),
         "hole_count": int(params.get("hole_count", 4)),
+        "hole_inset": params.get("hole_inset", 0),
         "base_len": params.get("base_len"), "base_wid": params.get("base_wid"),
         "base_th": params.get("base_th"), "vert_len": params.get("vert_len"),
         "vert_th": params.get("vert_th"),

@@ -31,6 +31,16 @@ GATED_NOTE = {
     "leveling_foot": "turned part — manual CAM on the lathe (Ferro does not generate lathe G-code yet)",
 }
 
+# --- post processor layer: dialects the shop's controllers speak ---
+POSTS = {
+    "linuxcnc":   "LinuxCNC / LinuxCNC-based controllers (default)",
+    "grbl":       "GRBL 1.1 ( hobby routers, many desktop machines)",
+    "centroid":   "Centroid CNC",
+    "mach3_mach4": "Mach3 / Mach4",
+    "fanuc":      "Fanuc (legacy dialect)",
+    "generic":    "generic G-code — last resort, edit before use",
+}
+
 # conservative prototype feeds (mm/min) — replace with shop calibration data
 FEEDS = {
     "6061-T6": (2200, 800, 12000), "7075-T6": (2200, 800, 12000),
@@ -52,28 +62,47 @@ step = r"%(step)s"
 out  = r"%(out)s"
 feed, plunge, rpm = %(feed).1f, %(plunge).1f, %(rpm).0f
 tool_d = %(tool_d).1f
+drill_d = %(drill_d).1f
+post_name = r"%(post)s"
 
 doc = FreeCAD.newDocument("cam")
 Import.insert(step, doc.Name)
 base = doc.Objects[0]
 job = PathJob.Create("Job", [base])
 doc.recompute()
-tc = PathTC.Create("TC: endmill")
+
+# --- tool library: T1 endmill (contour), T2 drill ---
+tc = PathTC.Create("T1: %%.0fmm endmill" %% tool_d)
 job.Proxy.addToolController(tc)
 tc.HorizFeed = "%%.3f mm/min" %% feed
 tc.VertFeed  = "%%.3f mm/min" %% plunge
 tc.SpindleSpeed = rpm
+tc.ToolNumber = 1
 try:
     tc.Tool.Diameter = tool_d
 except Exception:
     pass
+tc2 = PathTC.Create("T2: %%.0fmm drill" %% drill_d)
+job.Proxy.addToolController(tc2)
+tc2.HorizFeed = "%%.3f mm/min" %% (feed * 0.6)
+tc2.VertFeed  = "%%.3f mm/min" %% (plunge * 0.8)
+tc2.SpindleSpeed = rpm
+tc2.ToolNumber = 2
+try:
+    tc2.Tool.Diameter = drill_d
+except Exception:
+    pass
 doc.recompute()
 
-ops = {}
+ops = {"tools": {"T1": "endmill d=%%.1f" %% tool_d, "T2": "drill d=%%.1f" %% drill_d}}
 op = PathProfile.Create("Profile")
 op.Base = [(base, [])]
 op.processHoles = True
 op.processPerimeter = True
+try:
+    op.ToolController = tc   # contour MUST run on the endmill, not the drill
+except Exception:
+    pass
 doc.recompute()
 ops["profile_cmds"] = len(op.Path.Commands) if op.Path else 0
 
@@ -90,6 +119,10 @@ try:
             pass
     if hole_edges:
         dr.Base = [(base, tuple(hole_edges[:10]))]
+        try:
+            dr.ToolController = tc2
+        except Exception:
+            pass
         doc.recompute()
         ops["drill_holes"] = len(hole_edges)
         ops["drilling_cmds"] = len(dr.Path.Commands) if dr.Path else 0
@@ -98,7 +131,7 @@ try:
 except Exception as e:
     ops["drill_err"] = repr(e)[:120]
 
-post = PostProcessorFactory.get_post_processor(job, "linuxcnc")
+post = PostProcessorFactory.get_post_processor(job, post_name)
 data = post.export()
 gcode = data[0][1]
 txt = gcode if isinstance(gcode, str) else "\n".join(gcode)
@@ -132,7 +165,8 @@ def route(family):
                 family, f"family '{family}' not CAM-routed yet — human estimator")}
 
 
-def generate(session, family="flange", material="316L", tool_d=6.0, timeout=240):
+def generate(session, family="flange", material="316L", tool_d=6.0,
+             drill_d=5.2, post="linuxcnc", timeout=240):
     """Generate G-code from the session's verified STEP. Returns dict."""
     step = ARTIFACTS / session / "part.step"
     out = ARTIFACTS / session / "part.nc"
@@ -141,10 +175,12 @@ def generate(session, family="flange", material="316L", tool_d=6.0, timeout=240)
     if family not in CAM_OK_FAMILIES:
         r = route(family)
         return {"ok": False, "gated": True, "reason": r["reason"]}
+    if post not in POSTS:
+        return {"ok": False, "error": f"unknown post '{post}' — pick one of {list(POSTS)}"}
     feed, plunge, rpm = FEEDS.get(material, FEEDS["316L"])
     script = CAM_SCRIPT % {
         "step": str(step), "out": str(out), "feed": feed, "plunge": plunge,
-        "rpm": rpm, "tool_d": tool_d}
+        "rpm": rpm, "tool_d": tool_d, "drill_d": drill_d, "post": post}
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(script)
         spath = f.name
@@ -158,7 +194,7 @@ def generate(session, family="flange", material="316L", tool_d=6.0, timeout=240)
             ops = json.loads(m.group(1))
             return {"ok": True, "gcode_url": f"/artifacts/{session}/part.nc",
                     "gcode_lines": int(g.group(1)), "ops": ops,
-                    "post": "linuxcnc", "machine": "3-axis mill",
+                    "post": post, "post_note": POSTS[post], "machine": "3-axis mill",
                     "feeds": {"feed": feed, "plunge": plunge, "rpm": rpm},
                     "gated": False,
                     "warning": "PROTOTYPE — NOT MACHINE-READY — verify on shop floor"}

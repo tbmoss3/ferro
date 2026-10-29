@@ -35,6 +35,11 @@ def generate(req: dict):
     family = req.get("family") or "flange"
     material = req.get("material") or "316L"
     size_mm = req.get("size_mm") or [90, 90, 12]
+    post = req.get("post") or "linuxcnc"
+    if post not in cam_bridge.POSTS:
+        return JSONResponse(
+            {"ok": False, "error": f"unknown post '{post}'",
+             "posts": list(cam_bridge.POSTS)}, status_code=400)
     if not step_b64:
         return JSONResponse({"ok": False, "error": "no step_b64"}, status_code=400)
     if family not in cam_bridge.CAM_OK_FAMILIES:
@@ -54,7 +59,8 @@ def generate(req: dict):
             feed, plunge, rpm = cam_bridge.FEEDS.get(material, cam_bridge.FEEDS["316L"])
             script = cam_bridge.CAM_SCRIPT % {
                 "step": str(step), "out": str(out), "feed": feed,
-                "plunge": plunge, "rpm": rpm, "tool_d": 6.0}
+                "plunge": plunge, "rpm": rpm, "tool_d": 6.0,
+                "drill_d": 5.2, "post": post}
             import re as _re, subprocess as _sp
             with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
                 f.write(script)

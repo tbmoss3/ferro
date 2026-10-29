@@ -87,7 +87,7 @@ You operate in TWO modes:
 
 MODE 1 — PARAMETRIC (preferred when it fits). Parametric engine families (mm):
 - bracket: base_len, base_wid, base_th, vert_len, vert_th, hole_d, hole_count, fillet_r
-- plate: length, width, thickness, hole_d, hole_count, corner_r
+- plate: length, width, thickness, hole_d, hole_count, corner_r, hole_inset (mm from edge to hole center — set it when the customer gives an edge distance; 0 = let the kernel choose)
 - enclosure: width, depth, height, wall, lid, vents, port_w, port_h
 - flange: od, bore, thickness, bcd (bolt circle), bolt_count, bolt_d
 - spacer: od, bore, thickness
@@ -557,7 +557,8 @@ def _build_reply(session, message, file=None, design_time_s=None):
                         camres = {"ok": False, "error": "no verified STEP"}
                 else:
                     camres = cam_bridge.generate(session, family=fam_cam,
-                        material=kx.get("material") or "316L")
+                        material=kx.get("material") or "316L",
+                        post=os.environ.get("FERRO_CAM_POST", "linuxcnc"))
                 # ---- simulation/verification gate (deterministic) ----
                 nc = camres.get("gcode_url") and DATA_DIR / "artifacts" / session / "part.nc"
                 if camres.get("ok") and nc and nc.exists():

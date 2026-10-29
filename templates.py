@@ -12,7 +12,7 @@ SCHEMAS = {
     ),
     "plate": dict(
         length=150.0, width=100.0, thickness=10.0,
-        hole_d=6.5, hole_count=4, corner_r=6.0,
+        hole_d=6.5, hole_count=4, corner_r=6.0, hole_inset=0.0,
     ),
     "enclosure": dict(
         width=120.0, depth=80.0, height=50.0, wall=3.0,
@@ -269,7 +269,12 @@ def _boxes(p):
         L, W = p["length"], p["width"]
         boxes = [(0, 0, 0, L, W, p["thickness"])]
         n = max(1, int(round(p["hole_count"])))
-        inset = min(0.08 * min(L, W), 15.0)
+        inset = p.get("hole_inset") or 0
+        if inset <= 0:
+            inset = min(0.08 * min(L, W), 15.0)
+        else:
+            D = p.get("hole_d") or 6.5
+            inset = min(inset, L / 2 - D / 2 - 2, W / 2 - D / 2 - 2)
         rows = 2 if (n % 2 == 0 and n >= 4) else 1
         cols = (n + rows - 1) // rows
         holes = []

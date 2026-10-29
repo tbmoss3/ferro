@@ -8,3 +8,5 @@ artifacts/
 nohup.out
 uploads/
 cam_venvs/
+node_modules/
+.railway/config.json

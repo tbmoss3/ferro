@@ -599,6 +599,9 @@ def _build_reply(session, message, file=None, design_time_s=None):
         resp.pop("quote", None)
         resp.pop("order_id", None)
         resp.pop("order_url", None)
+    # public site is view-only: strip downloadable file URLs LAST (after CAM
+    # has consumed step_url); admin workshop rebuilds them from the DB+disk
+    _strip_public_urls(resp)
     return resp
 
 TURN_START = {}
@@ -648,16 +651,235 @@ def result(session: str):
                 "kernel": _j.loads(row["kernel"] or "null"),
                 "dfm_notes": [],
             }  # quote/order stay internal-only (JV policy 2026-10-28)
+            _strip_public_urls(r)
             return {"status": "done", "result": r}
         return {"status": "none"}
     return {"status": cur["status"], "result": cur.get("result")}
 
 from fastapi.responses import FileResponse
 
+# ---------- admin / workshop layer ----------
+# Public site is view-only: no file downloads. Every session is a persistent
+# project; Benton + partner work them in the /admin workshop (auth via
+# ADMIN_PASSWORD env). Downloadable artifacts require the admin cookie.
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+PUBLIC_VIEW_ONLY = os.environ.get("FERRO_PUBLIC_VIEW_ONLY", "1") == "1"
+LOCKED_FILES = {"part.step", "part.stl", "part.nc",
+                "drawing.dxf", "drawing.svg"}
+PUBLIC_FILES = {"preview.png", "drawing.png", "part.glb"}
+
+
+def _admin_token():
+    import hashlib
+    if not ADMIN_PASSWORD:
+        return ""
+    return hashlib.sha256(("ferro-admin:" + ADMIN_PASSWORD).encode()).hexdigest()
+
+
+def is_admin(request):
+    tok = request.cookies.get("ferro_admin") or ""
+    return bool(ADMIN_PASSWORD) and tok == _admin_token()
+
+
+def _strip_public_urls(resp):
+    """Remove download-bearing URLs from a PUBLIC-facing response.
+    Viewer needs preview/glb only (rendered in-page, gated server-side too)."""
+    if not PUBLIC_VIEW_ONLY:
+        return
+    k = resp.get("kernel") or {}
+    for key in ("step_url", "stl_url", "drawing_dxf_url", "drawing_svg_url"):
+        k.pop(key, None)
+    cam = resp.get("cam") or {}
+    if isinstance(cam, dict):
+        cam.pop("gcode_url", None)
+    resp.pop("order_url", None)
+    resp.pop("order_id", None)
+
+
+from fastapi.responses import HTMLResponse as _HTML  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi import Request as _Req  # noqa: E402
+import secrets as _secrets  # noqa: E402
+
+
+@app.post("/admin/login")
+async def admin_login(req: _Req):
+    body = await req.json()
+    if not ADMIN_PASSWORD or body.get("password") != ADMIN_PASSWORD:
+        return {"ok": False, "error": "bad credentials"}
+    r = JSONResponse({"ok": True})
+    r.set_cookie("ferro_admin", _admin_token(), httponly=True, samesite="lax")
+    return r
+
+
+@app.get("/admin/logout")
+def admin_logout():
+    r = JSONResponse({"ok": True})
+    r.set_cookie("ferro_admin", "", expires=0)
+    return r
+
+
+ADMIN_LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferro workshop</title><style>
+ body{font-family:system-ui,sans-serif;background:#0d0f13;color:#ecebe6;display:flex;
+      align-items:center;justify-content:center;min-height:100vh;margin:0;}
+ .card{background:#171a20;border:1px solid #2e343f;border-radius:14px;padding:28px;width:320px;}
+ h1{font-size:18px;margin:0 0 14px;} input{width:100%;box-sizing:border-box;padding:11px;
+      border-radius:9px;border:1px solid #2e343f;background:#111319;color:#ecebe6;font-size:15px;}
+ button{width:100%;margin-top:10px;padding:11px;border:0;border-radius:9px;background:#e8853d;
+      color:#16110c;font-weight:700;cursor:pointer;font-size:15px;}
+ .err{color:#e8853d;font-size:13px;margin-top:8px;min-height:16px;}
+</style></head><body><div class="card">
+<h1>FERRO <span style="color:#e8853d">·</span> workshop</h1>
+<input id="pw" type="password" placeholder="admin password" onkeydown="if(event.key==='Enter')go()">
+<button onclick="go()">Enter workshop</button><div class="err" id="e"></div>
+</div><script>async function go(){const r=await fetch('/admin/login',{method:'POST',
+ headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({password:document.getElementById('pw').value})});
+ if(r.ok){const j=await r.json(); if(j.ok){location.href='/admin';return;}}
+ document.getElementById('e').textContent='wrong password';}</script></body></html>"""
+
+
+@app.get("/admin")
+def admin_home(request: _Req):
+    if not is_admin(request):
+        return _HTML(ADMIN_LOGIN_PAGE)
+    with DB_LOCK:
+        con = db()
+        con.row_factory = sqlite3.Row
+        rows = con.execute("""SELECT order_id, session, family, created, updated,
+            design, kernel, quote, design_time_s, price_status
+            FROM orders ORDER BY updated DESC LIMIT 200""").fetchall()
+        con.close()
+    import json as _j
+    tr = []
+    for r in rows:
+        q = _j.loads(r["quote"] or "{}")
+        d = _j.loads(r["design"] or "{}")
+        k = _j.loads(r["kernel"] or "{}")
+        fam = r["family"] or d.get("family") or "?"
+        vol = k.get("volume_mm3") or d.get("volume_mm3") or ""
+        tr.append(f"""<tr>
+          <td><a href="/admin/project/{r['order_id']}">{r['order_id']}</a></td>
+          <td>{fam}</td><td>{r['created'][:16]}</td>
+          <td>{r['design_time_s'] or ''}s</td>
+          <td>{q.get('price', '')}</td><td>{r['price_status'] or 'pending'}</td>
+          <td>{vol}</td></tr>""")
+    return _HTML(f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferro workshop — projects</title><style>
+ body{{font-family:system-ui,sans-serif;background:#0d0f13;color:#ecebe6;margin:0;padding:28px;}}
+ h1{{font-size:20px;}} a{{color:#e8853d;text-decoration:none;}}
+ table{{border-collapse:collapse;width:100%;max-width:900px;font-size:14px;}}
+ th,td{{padding:8px 12px;border-bottom:1px solid #232830;text-align:left;}}
+ th{{color:#a3aab6;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:1px;}}
+ .bar{{display:flex;gap:14px;align-items:center;margin-bottom:18px;}}
+ .out{{margin-left:auto;font-size:13px;color:#a3aab6;}}
+</style></head><body>
+<div class="bar"><h1>FERRO <span style="color:#e8853d">·</span> workshop</h1>
+ <a href="/">← public site</a><span class="out"><a href="/admin/logout">logout</a></span></div>
+<table><tr><th>project</th><th>family</th><th>created</th><th>design t</th>
+<th>est $</th><th>price</th><th>vol mm³</th></tr>
+{''.join(tr) or '<tr><td colspan=7>no projects yet</td></tr>'}
+</table></body></html>""")
+
+
+@app.get("/admin/project/{oid}")
+def admin_project(oid: str, request: _Req):
+    if not is_admin(request):
+        return _HTML(ADMIN_LOGIN_PAGE)
+    o = order_get(oid)
+    if not o:
+        return _HTML("<h1>project not found</h1>")
+    import json as _j
+    q = _j.loads(o.get("quote") or "{}")
+    d = _j.loads(o.get("design") or "{}")
+    k = _j.loads(o.get("kernel") or "{}")
+    sess = o["session"]
+    fam = d.get("family") or o.get("family") or "?"
+    files = []
+    for fn, label in (("part.step", "STEP (CAD)"), ("part.stl", "STL"),
+                      ("drawing.dxf", "Drawing (DXF)"), ("drawing.png", "Drawing (PNG)"),
+                      ("preview.png", "Render (PNG)"), ("part.nc", "G-code (linuxcnc)")):
+        p = DATA_DIR / "artifacts" / sess / fn
+        if p.exists():
+            files.append(f'<a class="dl" href="/admin/dl/{oid}/{fn}">⇩ {label}</a>')
+    cam_note = ""
+    if fam in ("pulley", "shaft_collar", "leveling_foot"):
+        cam_note = "<p class='dim'>turned family — manual CAM on the lathe (gated)</p>"
+    return _HTML(f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferro workshop — {oid}</title><style>
+ body{{font-family:system-ui,sans-serif;background:#0d0f13;color:#ecebe6;margin:0;padding:28px;}}
+ h1{{font-size:20px;}} a{{color:#e8853d;text-decoration:none;}}
+ .card{{background:#171a20;border:1px solid #2e343f;border-radius:12px;padding:18px;
+      max-width:760px;margin:14px 0;}}
+ .dl{{display:inline-block;margin:4px 8px 4px 0;padding:8px 14px;border:1px solid #e8853d55;
+      border-radius:9px;font-size:14px;}}
+ .row{{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #232830;
+      font-size:14px;}} .dim{{color:#a3aab6;font-size:13px;}}
+ pre{{background:#111319;padding:12px;border-radius:8px;font-size:12px;overflow:auto;
+      max-height:260px;white-space:pre-wrap;}}
+ img{{max-width:100%;border-radius:10px;}}
+ button{{padding:10px 18px;border:0;border-radius:9px;background:#e8853d;color:#16110c;
+      font-weight:700;cursor:pointer;}}
+ .bar{{display:flex;gap:14px;align-items:center;}}
+</style></head><body>
+<div class="bar"><h1>project <span style="color:#e8853d">{oid}</span></h1>
+ <a href="/admin">← all projects</a></div>
+<div class="card"><b>{fam}</b> · session {sess} · created {o['created'][:16]}
+ <div class="row"><span class="dim">internal estimate</span><span>${q.get('price','—')} · {q.get('lead_days','—')} days</span></div>
+ <div class="row"><span class="dim">design time</span><span>{o.get('design_time_s') or '—'}s</span></div>
+ <div class="row"><span class="dim">price status</span><span>{o.get('price_status') or 'pending'}</span></div>
+ <div class="row"><span class="dim">material</span><span>{d.get('material') or k.get('material') or '—'}</span></div>
+ <div class="row"><span class="dim">volume</span><span>{k.get('volume_mm3') or d.get('volume_mm3') or '—'} mm³</span></div>
+</div>
+<div class="card"><b>files</b>{cam_note}<div>{''.join(files) or '<span class=dim>none yet — run a design turn in this project</span>'}</div></div>
+<div class="card"><b>continue with the agent</b>
+ <p class="dim">Send another message against this project's session ({sess}) — the agent keeps its state.</p>
+ <input id="msg" style="width:70%;padding:10px;border-radius:8px;border:1px solid #2e343f;background:#111319;color:#ecebe6" placeholder="e.g. make the bore 10mm">
+ <button onclick="sendMsg()">send</button><div class="dim" id="st" style="margin-top:8px"></div>
+ <script>async function sendMsg(){{
+   const m = document.getElementById('msg').value; if(!m) return;
+   document.getElementById('st').textContent = 'agent working…';
+   await fetch('/chat', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+     body: JSON.stringify({{session: '{sess}', message: m}})}});
+   setTimeout(()=>location.reload(), 30000);
+ }}</script></div>
+<div class="card"><b>design state</b><pre>{_j.dumps(d, indent=1, default=str)}</pre></div>
+<div class="card"><b>kernel</b><pre>{_j.dumps(k, indent=1, default=str)}</pre></div>
+<div class="card"><b>3D</b>
+ <img src="/admin/dl/{oid}/preview.png" onerror="this.replaceWith('(no render)')"></div>
+</body></html>""")
+
+
+@app.get("/admin/dl/{oid}/{fn}")
+def admin_dl(oid: str, fn: str, request: _Req):
+    if not is_admin(request):
+        return _HTML(ADMIN_LOGIN_PAGE)
+    o = order_get(oid)
+    if not o:
+        return {"error": "project not found"}
+    p = DATA_DIR / "artifacts" / o["session"] / fn
+    if not p.exists():
+        return {"error": "file not found"}
+    media = {"part.step": "application/step", "part.stl": "model/stl",
+             "part.glb": "model/gltf-binary", "preview.png": "image/png",
+             "drawing.png": "image/png", "drawing.svg": "image/svg+xml",
+             "drawing.dxf": "application/dxf",
+             "part.nc": "text/plain; charset=utf-8"}.get(fn, "application/octet-stream")
+    return FileResponse(p, media_type=media, filename=fn)
+
+
 @app.get("/artifacts/{name}/{fn}")
-def artifact(name: str, fn: str):
+def artifact(name: str, fn: str, request: _Req):
     if "/" in fn or ".." in fn or "/" in name or ".." in name:
         return {"error": "bad path"}
+    if PUBLIC_VIEW_ONLY and fn in LOCKED_FILES and not is_admin(request):
+        return _HTML("<h1>🔒 403</h1><p>Files stay on Ferro's servers. Our engineers handle production.</p>",
+                      status_code=403)
     p = DATA_DIR / "artifacts" / name / fn
     if not p.exists():
         return {"error": "not found"}
@@ -722,7 +944,7 @@ def orders_list():
     with DB_LOCK:
         con = db()
         con.row_factory = sqlite3.Row
-        rows = con.execute("SELECT order_id, session, family, created, quote FROM orders ORDER BY updated DESC LIMIT 100").fetchall()
+        rows = con.execute("SELECT order_id, session, family, created, quote, design_time_s, price_status, first_pass_yield FROM orders ORDER BY updated DESC LIMIT 100").fetchall()
         con.close()
     import json as _j
     return [{"order_id": r["order_id"], "session": r["session"], "family": r["family"],

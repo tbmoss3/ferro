@@ -194,15 +194,11 @@ function buildPacket(j) {
         </div>
       </div>` : ""}
       <div class="pscroll">${rows}${metrics}</div>
-      <div class="dlrow">
-        ${k.step_url ? `<a class="dlbtn" href="${bust(k.step_url, REV)}" download>⇩ STEP</a>` : ""}
-        ${k.glb_url ? `<a class="dlbtn" href="${bust(k.glb_url, REV)}" download>⇩ 3D (GLB)</a>` : ""}
-        ${k.drawing_dxf_url ? `<a class="dlbtn" href="${bust(k.drawing_dxf_url, REV)}" download>⇩ Drawing (DXF)</a>` : ""}
-        ${k.drawing_svg_url ? `<a class="dlbtn ghost" href="${bust(k.drawing_svg_url, REV)}" download>⇩ 2D (SVG)</a>` : ""}
-        ${k.stl_url ? `<a class="dlbtn ghost" href="${bust(k.stl_url, REV)}" download>⇩ STL</a>` : ""}
+      <div class="dlrow locked">
+        <span class="locknote">🔒 Files stay on Ferro's servers — our engineers take it from here (STEP · drawing · toolpaths)</span>
       </div>
       ${j.cam ? (j.cam.routed && j.cam.gcode_url
-        ? `<div class="camrow">⚙ <b>CAM</b> · ${esc(j.cam.machine)} · ${esc(j.cam.post || "linuxcnc")} · ${j.cam.gcode_lines} lines · <a class="dlbtn ghost camg" href="${bust(j.cam.gcode_url, REV)}" download>⇩ G-code</a> <span class="camgate">${j.cam.verify ? (j.cam.verify.ok ? "✓ sim gate: passed · " + (j.cam.verify.stats.cut_mm||0) + "mm cut · max depth " + (j.cam.verify.stats.max_depth_mm||0) + "mm" : "⛔ sim gate: BLOCKED") : ""} ⚠ prototype — not machine-ready</span></div>`
+        ? `<div class="camrow">⚙ <b>CAM</b> · ${esc(j.cam.machine)} · ${esc(j.cam.post || "linuxcnc")} · ${j.cam.gcode_lines} lines <span class="camgate">${j.cam.verify ? (j.cam.verify.ok ? "✓ sim gate: passed · " + (j.cam.verify.stats.cut_mm||0) + "mm cut · max depth " + (j.cam.verify.stats.max_depth_mm||0) + "mm" : "⛔ sim gate: BLOCKED") : ""} ⚠ prototype — not machine-ready</span></div>`
         : `<div class="camrow gated">⚙ <b>CAM</b> · ${esc(j.cam.gate || j.cam.error || "manual CAM — unavailable in this environment")}${j.cam.verify && !j.cam.verify.ok ? " — ⛔ " + esc((j.cam.verify.blocked||[]).slice(0,2).join("; ")) : ""}</div>`) : ""}
       <button class="approve">Approve for CAD</button>
     </div>
